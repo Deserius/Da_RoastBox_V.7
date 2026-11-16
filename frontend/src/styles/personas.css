@@ -27,9 +27,36 @@
 .persona-results-count { margin: 8px 2px 11px; color: #a79c94; font: 600 11px system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; }
 .persona-favorites-error { margin: 8px 0; padding: 10px 12px; border: 1px solid #a94339; border-radius: 10px; color: #ffd0c8; font: 13px/1.4 system-ui, sans-serif; }
 .persona-favorites-error button { color: #ffa36b; text-decoration: underline; border: 0; padding: 0; background: transparent; cursor: pointer; font: inherit; }
-.persona-browser .persona-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.persona-browser .persona-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 6px; }
 .persona-browser .persona-grid.showcase { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
 .persona-browser .persona-card { padding: 8px; border-radius: 17px; background: linear-gradient(160deg, #211d1b, #151313); }
+.persona-browser .persona-card.selected,
+.persona-browser .persona-card.premium.selected {
+  border-color: #df9eff;
+  background: linear-gradient(160deg, rgba(168, 85, 247, 0.22), #181122);
+  box-shadow: 0 0 0 2px rgba(229, 184, 255, 0.9), 0 0 18px rgba(192, 132, 252, 0.8), 0 0 30px rgba(168, 85, 247, 0.5);
+  animation: persona-selected-purple-pulse 1.8s ease-in-out infinite;
+}
+.persona-browser .persona-card.selected:hover,
+.persona-browser .persona-card.premium.selected:hover { border-color: #f0ccff; }
+.persona-browser .persona-card.selected .persona-portrait-wrap img {
+  box-shadow: 0 0 0 2px rgba(232, 194, 255, 0.9), 0 0 14px rgba(192, 132, 252, 0.78);
+}
+.persona-browser .persona-card.selected .badge-num {
+  background: linear-gradient(135deg, #f0ccff, #c084fc);
+  color: #160624;
+  box-shadow: 0 0 14px rgba(216, 180, 254, 0.95);
+}
+@keyframes persona-selected-purple-pulse {
+  0%, 100% {
+    border-color: #d896ff;
+    box-shadow: 0 0 0 2px rgba(229, 184, 255, 0.82), 0 0 14px rgba(192, 132, 252, 0.65), 0 0 24px rgba(168, 85, 247, 0.35);
+  }
+  50% {
+    border-color: #f0ccff;
+    box-shadow: 0 0 0 3px rgba(240, 204, 255, 1), 0 0 22px rgba(216, 180, 254, 0.95), 0 0 38px rgba(168, 85, 247, 0.72);
+  }
+}
 .persona-card-main { min-width: 0; width: 100%; flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0; border: 0;
   background: none; color: inherit; text-align: center; cursor: pointer; font: inherit; }
 .persona-portrait-wrap { position: relative; width: 100%; display: block; }
@@ -131,4 +158,8 @@
   .persona-profile-portrait { width: 82px; }
   .persona-profile h2 { overflow-wrap: anywhere; font-size: 22px; }
 }
-@media (prefers-reduced-motion: reduce) { .persona-spin { animation-duration: 2s; } }
+@media (prefers-reduced-motion: reduce) {
+  .persona-spin { animation-duration: 2s; }
+  .persona-browser .persona-card.selected,
+  .persona-browser .persona-card.premium.selected { animation: none; }
+}

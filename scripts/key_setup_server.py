@@ -431,7 +431,7 @@ FIELD_CATALOG: list[dict[str, Any]] = [
         "purpose": "Database storing user accounts, credits, roasts, battles, reels, and payment ledgers.",
         "portal_name": "MongoDB Atlas",
         "portal_url": "https://cloud.mongodb.com",
-        "format_hint": "mongodb://... or mongodb+srv://user:pass@cluster.mongodb.net/",
+        "format_hint": "mongodb://... or mongodb+srv://<user>:<password>@cluster.mongodb.net/",
         "steps": [
             "For local sandbox preview: keep mongodb://127.0.0.1:27017.",
             "For production: create a free M0 or dedicated cluster at https://cloud.mongodb.com.",

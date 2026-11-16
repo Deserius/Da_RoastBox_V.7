@@ -53,7 +53,7 @@ async def _check_tts():
 
 
 async def _check_stripe():
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    from routes.payments import StripeCheckout
     if not STRIPE_API_KEY or not STRIPE_WEBHOOK_SECRET:
         raise RuntimeError("Both STRIPE_API_KEY and STRIPE_WEBHOOK_SECRET are required for checkout")
     StripeCheckout(api_key=STRIPE_API_KEY, webhook_secret=STRIPE_WEBHOOK_SECRET, webhook_url=None)

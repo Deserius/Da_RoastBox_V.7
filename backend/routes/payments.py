@@ -7,6 +7,7 @@ Architecture:
 
 Server-authoritative pricing. Idempotent purchase application.
 """
+import asyncio
 import logging
 import math
 from decimal import Decimal, ROUND_HALF_UP
@@ -17,9 +18,88 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from pymongo.errors import DuplicateKeyError
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout, CheckoutSessionRequest
-)
+try:
+    from emergentintegrations.payments.stripe.checkout import (
+        StripeCheckout, CheckoutSessionRequest
+    )
+except ImportError:
+    class CheckoutSessionRequest(BaseModel):
+        amount: float | None = None
+        currency: str = "usd"
+        success_url: str
+        cancel_url: str
+        metadata: dict[str, str] | None = None
+        payment_methods: list[str] | None = None
+        stripe_price_id: str | None = None
+        quantity: int = 1
+
+    class _CheckoutSessionResponse(BaseModel):
+        url: str
+        session_id: str
+
+    class _CheckoutStatusResponse(BaseModel):
+        status: str
+        payment_status: str
+        amount_total: int
+        currency: str
+        metadata: dict[str, str] = {}
+
+    class _WebhookEventResponse(BaseModel):
+        event_type: str = ""
+        event_id: str = ""
+        session_id: str | None = None
+        payment_status: str = ""
+        metadata: dict = {}
+
+    class StripeCheckout:  # type: ignore[no-redef]
+        def __init__(self, api_key: str, webhook_url: str | None = None, webhook_secret: str | None = None):
+            self.api_key = api_key
+            self.webhook_url = webhook_url
+            self.webhook_secret = webhook_secret
+            stripe.api_key = api_key
+
+        async def create_checkout_session(self, req: CheckoutSessionRequest) -> _CheckoutSessionResponse:
+            def _create():
+                cents = int((Decimal(str(req.amount or 0)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+                return stripe.checkout.Session.create(
+                    mode="payment",
+                    line_items=[{
+                        "price_data": {
+                            "currency": req.currency,
+                            "product_data": {"name": (req.metadata or {}).get("name", "Da RoastBox")},
+                            "unit_amount": cents,
+                        },
+                        "quantity": req.quantity,
+                    }],
+                    success_url=req.success_url,
+                    cancel_url=req.cancel_url,
+                    metadata=req.metadata or {},
+                )
+            sess = await asyncio.to_thread(_create)
+            return _CheckoutSessionResponse(url=sess.url, session_id=sess.id)
+
+        async def get_checkout_status(self, session_id: str) -> _CheckoutStatusResponse:
+            sess = await asyncio.to_thread(stripe.checkout.Session.retrieve, session_id)
+            return _CheckoutStatusResponse(
+                status=getattr(sess, "status", "open") or "open",
+                payment_status=getattr(sess, "payment_status", "unpaid") or "unpaid",
+                amount_total=int(getattr(sess, "amount_total", 0) or 0),
+                currency=getattr(sess, "currency", "usd") or "usd",
+                metadata=dict(getattr(sess, "metadata", {}) or {}),
+            )
+
+        async def handle_webhook(self, payload: bytes, signature: str) -> _WebhookEventResponse:
+            if not self.webhook_secret:
+                raise ValueError("webhook_secret required")
+            evt = stripe.Webhook.construct_event(payload, signature, self.webhook_secret)
+            obj = evt["data"]["object"] if isinstance(evt, dict) else evt.data.object
+            return _WebhookEventResponse(
+                event_type=evt.get("type", "") if isinstance(evt, dict) else getattr(evt, "type", ""),
+                event_id=evt.get("id", "") if isinstance(evt, dict) else getattr(evt, "id", ""),
+                session_id=obj.get("id") if isinstance(obj, dict) else getattr(obj, "id", None),
+                payment_status=obj.get("payment_status", "") if isinstance(obj, dict) else getattr(obj, "payment_status", ""),
+                metadata=dict(obj.get("metadata") or {}) if isinstance(obj, dict) else dict(getattr(obj, "metadata", {}) or {}),
+            )
 
 from auth_deps import get_current_user, active_plan_tier
 from models import User, PaymentTransaction, CreditTransaction

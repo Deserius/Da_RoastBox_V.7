@@ -35,7 +35,8 @@ async def download_source():
                 full = Path(root) / fname
                 lowered = fname.lower()
                 if (fname in EXCLUDE_FILE_NAMES or full.is_symlink() or full.suffix.lower() in EXCLUDE_SUFFIXES or
-                        lowered.startswith(".env") or "token.json" in lowered or "credentials.json" in lowered):
+                        (lowered.startswith(".env") and not lowered.endswith(".env.example")) or
+                        "token.json" in lowered or "credentials.json" in lowered):
                     continue
                 # Skip huge files (>5MB) except known important assets
                 try:

@@ -177,6 +177,7 @@ export const RoastTheater = ({ transcript, personaById, images = [], lineupIds, 
   useEffect(() => { crowd.setBeatVolume(safeBeatVolume); }, [safeBeatVolume]);
 
   const { play, stop, activeIdx, currentSpeech, needsAudioTap, resumeAudio, useCaptionsOnly } = useShowPlayer({
+    personaById,
     onMediaError: () => setMediaError("Some media couldn't be loaded. Check your connection or reopen the show."),
     onBeatDone: (beat, i) => {
       setLive((s) => ({ ...s, [beat.persona_id]: (s[beat.persona_id] || 0) + (POINTS[beat.laugh_after] || 0) }));

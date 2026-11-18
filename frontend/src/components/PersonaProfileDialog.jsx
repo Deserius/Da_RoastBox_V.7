@@ -6,6 +6,7 @@ import { mediaObjectUrl } from "@/lib/media";
 import { useAuth } from "@/lib/AuthContext";
 import { PersonaFavoriteButton } from "@/components/PersonaFavoriteButton";
 import { watchNarration } from "@/lib/audioFocus";
+import { isBrowserSpeechSupported, speakWithBrowserVoice, stopBrowserSpeech } from "@/lib/sandboxSpeech";
 
 export const PersonaProfileDialog = ({ persona: p, onClose, onPick, pickLabel, returnFocus }) => {
   const { user } = useAuth();
@@ -33,6 +34,7 @@ export const PersonaProfileDialog = ({ persona: p, onClose, onPick, pickLabel, r
     unwatchRef.current = null;
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = "";
+    stopBrowserSpeech();
   }, []);
 
   useEffect(() => {
@@ -84,6 +86,23 @@ export const PersonaProfileDialog = ({ persona: p, onClose, onPick, pickLabel, r
       const { data } = await api.get(`/personas/${encodeURIComponent(p.id)}/voice-preview`, {
         params: { sample: index }, signal: abort.signal, timeout: 120000,
       });
+      if (data.sandbox_preview && isBrowserSpeechSupported()) {
+        if (!mounted.current || sequence.current !== run) return;
+        setPlayback({ index, state: "playing" });
+        setError("");
+        speakWithBrowserVoice({
+          text: data.text || samples[index] || "",
+          personaId: p.id,
+          personaMeta: p,
+          emotion: "cocky",
+          onDone: () => {
+            if (mounted.current && sequence.current === run) {
+              setPlayback({ index: -1, state: "idle" });
+            }
+          },
+        });
+        return;
+      }
       const url = await mediaObjectUrl(data.audio_url, abort.signal);
       if (!mounted.current || sequence.current !== run) { URL.revokeObjectURL(url); return; }
       urlRef.current = url;

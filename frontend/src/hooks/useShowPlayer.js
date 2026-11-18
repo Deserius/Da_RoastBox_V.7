@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { mediaObjectUrl } from "@/lib/media";
 import { crowd } from "@/lib/crowdEngine";
 import { claimAudioFocus, releaseAudioFocus } from "@/lib/audioFocus";
+import { isBrowserSpeechSupported, speakWithBrowserVoice, stopBrowserSpeech, warmBrowserVoices } from "@/lib/sandboxSpeech";
 
 const wait = (ms, run) => new Promise((resolve) => {
   if (run.stopped) { resolve(); return; }
@@ -17,6 +18,9 @@ const wait = (ms, run) => new Promise((resolve) => {
 
 const loadVoice = async (beat, run) => {
   if (!beat?.audio_url) return null;
+  if (beat.provider === "sandbox_preview" && isBrowserSpeechSupported()) {
+    return { sandboxSpeech: true };
+  }
   try {
     const url = await mediaObjectUrl(beat.audio_url, run.abort.signal);
     if (run.stopped) { URL.revokeObjectURL(url); return null; }
@@ -28,6 +32,41 @@ const loadVoice = async (beat, run) => {
     return run.stopped ? null : { error: true };
   }
 };
+
+const speakSandbox = (beat, personaMeta, index, run, onUnblocked) => new Promise((resolve) => {
+  const words = (beat.text || "").trim().split(/\s+/).filter(Boolean).length;
+  const estMs = Math.max(1400, Math.min(12000, words * 330));
+  let finished = false;
+  let cancelSpeech = null;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    run.retrySpeech = null;
+    run.skipSpeech = null;
+    if (run.speech?.index === index) run.speech.finished = true;
+    resolve();
+  };
+  run.resolveSpeech = () => {
+    cancelSpeech?.();
+    done();
+  };
+  run.audio = null;
+  run.speech = { index, audio: null, startedAt: null, durationMs: estMs, finished: false };
+  onUnblocked?.();
+  cancelSpeech = speakWithBrowserVoice({
+    text: beat.text,
+    personaId: beat.introduced_persona_id || beat.persona_id,
+    personaMeta,
+    emotion: beat.emotion,
+    rapidFire: !!beat.rapid_fire,
+    onStart: () => {
+      if (!finished && run.speech?.index === index && run.speech.startedAt === null) {
+        run.speech.startedAt = performance.now();
+      }
+    },
+    onDone: done,
+  });
+});
 
 const speak = (audio, beat, index, run, onMediaError, onBlocked, onUnblocked) => new Promise((resolve) => {
   const words = (beat.text || "").trim().split(/\s+/).filter(Boolean).length;
@@ -87,14 +126,14 @@ const speak = (audio, beat, index, run, onMediaError, onBlocked, onUnblocked) =>
 });
 
 /** Plays a show: room tone → intro cheer → beats with comedic pauses, layered crowd reactions, tags riding the laugh. */
-export function useShowPlayer({ onBeatDone, onFinish, onReaction, onMediaError } = {}) {
+export function useShowPlayer({ personaById = {}, onBeatDone, onFinish, onReaction, onMediaError } = {}) {
   const [activeIdx, setActiveIdx] = useState(-1);
   const [playing, setPlaying] = useState(false);
   const [needsAudioTap, setNeedsAudioTap] = useState(false);
   const runRef = useRef(null);
   const audioFocusOwner = useRef({});
-  const cbRef = useRef({ onBeatDone, onFinish, onReaction, onMediaError });
-  cbRef.current = { onBeatDone, onFinish, onReaction, onMediaError };
+  const cbRef = useRef({ personaById, onBeatDone, onFinish, onReaction, onMediaError });
+  cbRef.current = { personaById, onBeatDone, onFinish, onReaction, onMediaError };
   const currentSpeech = useCallback(() => runRef.current?.speech || null, []);
 
   const stop = useCallback(() => {
@@ -109,6 +148,7 @@ export function useShowPlayer({ onBeatDone, onFinish, onReaction, onMediaError }
       run.urls.clear();
     }
     runRef.current = null;
+    stopBrowserSpeech();
     crowd.stopAll();
     releaseAudioFocus(audioFocusOwner.current);
     setActiveIdx(-1);
@@ -141,6 +181,9 @@ export function useShowPlayer({ onBeatDone, onFinish, onReaction, onMediaError }
     runRef.current = run;
     claimAudioFocus(audioFocusOwner.current);
     setPlaying(true);
+    if (lines.some((b) => b?.provider === "sandbox_preview")) {
+      warmBrowserVoices();
+    }
     await crowd.unlock();
     if (run.stopped) return;
     onIntroStart?.();
@@ -177,8 +220,14 @@ export function useShowPlayer({ onBeatDone, onFinish, onReaction, onMediaError }
         await wait(crowd.msToBeat(), run);
         if (run.stopped) return;
       }
-      await speak(voice?.audio, beat, i, run, onVoiceError,
-        () => setNeedsAudioTap(true), () => setNeedsAudioTap(false));
+      if (voice?.sandboxSpeech) {
+        const speakerId = beat.introduced_persona_id || beat.persona_id;
+        const speakerMeta = cbRef.current.personaById?.[speakerId] || cbRef.current.personaById?.[beat.persona_id];
+        await speakSandbox(beat, speakerMeta, i, run, () => setNeedsAudioTap(false));
+      } else {
+        await speak(voice?.audio, beat, i, run, onVoiceError,
+          () => setNeedsAudioTap(true), () => setNeedsAudioTap(false));
+      }
       if (voice?.url) { URL.revokeObjectURL(voice.url); run.urls.delete(voice.url); }
       voices[i] = null;
       if (run.stopped) return;

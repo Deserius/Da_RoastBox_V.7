@@ -103,6 +103,7 @@ async def voice_preview(persona_id: str, sample: int = Query(0, ge=0), current_u
         from services.storage import load_audio
         return await load_audio(doc.get("filename") or filename) is not None
 
+    sandbox_used = False
     lock = _preview_locks.setdefault((persona_id, sample), asyncio.Lock())
     async with lock:
         if not await is_cached():
@@ -132,18 +133,19 @@ async def voice_preview(persona_id: str, sample: int = Query(0, ge=0), current_u
                             allow_hosted_openai=not preview or preview_hosted)
                     except Exception as e:
                         raise HTTPException(status_code=503, detail="Voice preview unavailable. Check your voice provider configuration.") from e
+                    sandbox_used = preview_provider == "sandbox_preview"
                     await collection.update_one(
                         key,
                         {"$set": {
                             **key,
-                            "version": "sandbox-v1" if preview_provider == "sandbox_preview" else PREVIEW_VERSION,
+                            "version": "sandbox-v1" if sandbox_used else PREVIEW_VERSION,
                             "filename": filename,
                             "text": line,
                         }},
                         upsert=True)
             finally:
                 await voice_preview_leases_collection.delete_one({"_id": lease_key, "owner": owner})
-    return {"audio_url": f"/api/audio/{filename}", "text": line, "sample": sample}
+    return {"audio_url": f"/api/audio/{filename}", "text": line, "sample": sample, "sandbox_preview": sandbox_used}
 
 
 def get_personas_by_ids(ids):

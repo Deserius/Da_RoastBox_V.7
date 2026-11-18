@@ -22,6 +22,7 @@ const SECTION_ORDER = [
 export default function CreditsPage() {
   const [packs, setPacks] = useState([]);
   const [roastCosts, setRoastCosts] = useState({});
+  const [testPaymentsEnabled, setTestPaymentsEnabled] = useState(false);
   const [busy, setBusy] = useState("");
   const [loadError, setLoadError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -31,8 +32,14 @@ export default function CreditsPage() {
   useEffect(() => {
     let active = true;
     setLoadError(false);
-    api.get("/payments/packs").then(({ data }) => {
-      if (active) { setPacks(data.packs || []); setRoastCosts(data.roast_costs || {}); }
+    Promise.all([
+      api.get("/payments/packs"),
+      api.get("/diagnostics").catch(() => ({ data: {} })),
+    ]).then(([packsRes, diagRes]) => {
+      if (!active) return;
+      setPacks(packsRes.data?.packs || []);
+      setRoastCosts(packsRes.data?.roast_costs || {});
+      setTestPaymentsEnabled(!!diagRes.data?.config?.test_payments_enabled);
     }).catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
   }, [reload]);
@@ -68,6 +75,7 @@ export default function CreditsPage() {
   const planTier = user?.plan_tier || "free";
   const planActive = ["plus", "vip"].includes(planTier) && user?.plan_until && new Date(user.plan_until) > new Date();
   const isVip = planTier === "vip" && planActive;
+  const previewBlocked = !!user?.is_preview && !testPaymentsEnabled;
 
   return (
     <div className="workspace" style={{ gridTemplateColumns: "1fr" }} data-testid="credits-page">
@@ -76,7 +84,12 @@ export default function CreditsPage() {
         <p className="text-muted">
           30-day passes · credit packs · add-ons · Founder Pack for legends.
         </p>
-        {user?.is_preview && <p role="status" data-testid="preview-checkout-notice" className="text-muted" style={{ fontSize: 13 }}>
+        {testPaymentsEnabled && (
+          <p role="status" data-testid="test-checkout-notice" style={{ fontSize: 13, color: "var(--accent-alt)", marginBottom: 10 }}>
+            🧪 <strong>Stripe Test Mode active:</strong> You can run test purchases using the Stripe test key (no real charges).
+          </p>
+        )}
+        {previewBlocked && <p role="status" data-testid="preview-checkout-notice" className="text-muted" style={{ fontSize: 13 }}>
           Purchases are disabled for disposable preview accounts. Real checkout also requires the owner's Stripe configuration.
         </p>}
         {loadError && <ApiLoadError onRetry={() => setReload((n) => n + 1)}>Couldn't load the product catalog.</ApiLoadError>}
@@ -165,13 +178,19 @@ export default function CreditsPage() {
                       <button
                         className="btn-primary"
                         onClick={() => buy(p.id)}
-                        disabled={busy === p.id || owned || user?.is_preview}
+                        disabled={busy === p.id || owned || previewBlocked}
                         style={{ width: "100%" }}
                         data-testid={`buy-${p.id}-btn`}
                       >
                         {owned ? "Owned"
-                          : user?.is_preview ? "Unavailable in preview"
+                          : previewBlocked ? "Unavailable in preview"
                           : busy === p.id ? "Redirecting…"
+                          : testPaymentsEnabled ? (
+                            p.type === "plus_subscription" || p.type === "vip_subscription" ? "Test Buy 30-Day Pass"
+                            : p.type === "credits" ? "Test Buy Pack"
+                            : p.type === "lifetime_founder" ? "Test Founder Unlock"
+                            : "Test Unlock"
+                          )
                           : p.type === "plus_subscription" || p.type === "vip_subscription" ? "Buy 30-Day Pass"
                           : p.type === "credits" ? "Buy Pack"
                           : p.type === "lifetime_founder" ? "Become a Founder"

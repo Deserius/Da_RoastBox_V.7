@@ -91,6 +91,7 @@ async def generate_roast(
 
     img_bytes, img_types = await eng.read_images(images)
     byok_openai, byok_eleven = eng.user_byok(current_user)
+    byok_openrouter = eng.user_byok_openrouter(current_user)
     if current_user.is_preview and (not byok_openai or ROAST_WRITER_PROVIDER == "openrouter"):
         await consume_preview_hosted("show")
     prompt = build_roast_prompt(personas, subject_name, user_context, duration_minutes, roast_tier == "premium",
@@ -98,7 +99,8 @@ async def generate_roast(
                                 heat=heat, adult=adult_language, n_images=len(img_bytes), off_limits=off_limits, styles=styles)
     _pipeline_start = time.monotonic()
     meta_by_id = {p["id"]: p for p in personas}
-    premium_voices = (use_premium_voice or eng.has_premium_voices(current_user)) and not current_user.is_preview
+    requested_premium_voice = bool(use_premium_voice) or (roast_tier == "premium" and eng.has_premium_voices(current_user))
+    premium_voices = requested_premium_voice and not current_user.is_preview
     # Start voice work on each beat as it streams instead of waiting for the full script.
     started: Dict[str, asyncio.Task] = {}
 
@@ -117,15 +119,21 @@ async def generate_roast(
                                      expected_beats=_target_beats(duration_minutes),
                                      adult=adult_language, off_limits=off_limits,
                                      roast_tier=roast_tier, on_beat=_on_beat,
+                                     byok_openrouter=byok_openrouter,
                                      sandbox_context={
                                          "subject_name": subject_name,
                                          "user_context": user_context,
                                          "comedy_styles": styles,
                                          "heat": heat,
+                                         "premium_voice": requested_premium_voice,
                                      })
         used_sandbox_script = any(bool(b.pop("_sandbox_preview", False)) for b in written)
         beats = finish_roast_script(written, personas, subject_name, _target_beats(duration_minutes) + 1,
                                     adult=adult_language, off_limits=off_limits)
+        if used_sandbox_script:
+            for b in beats:
+                b["premium_voice"] = bool(requested_premium_voice)
+                b["roast_tier"] = roast_tier
         if not beats:
             raise RuntimeError("Roast model returned an empty script")
     except Exception as e:

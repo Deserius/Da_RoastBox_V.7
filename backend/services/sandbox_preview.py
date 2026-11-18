@@ -104,6 +104,8 @@ def build_sandbox_preview_beats(
     is_rap: bool = False,
     comedy_styles: Optional[List[str]] = None,
     heat: str = "medium",
+    roast_tier: str = "standard",
+    premium_voice: bool = False,
 ) -> List[Dict]:
     """Build a complete, persona-voiced script for sandbox preview mode."""
     if not personas:
@@ -174,6 +176,7 @@ def build_sandbox_preview_beats(
     laughs = ["small", "medium", "big", "explosive"]
     reactions = ["laugh", "ooh", "cheer"]
     style_hint = f" ({', '.join(comedy_styles[:2])})" if comedy_styles else ""
+    is_premium = roast_tier == "premium"
 
     beats = []
     for i in range(count):
@@ -182,34 +185,66 @@ def build_sandbox_preview_beats(
         punchlines = [ln for ln in (p.get("punchlines") or []) if isinstance(ln, str) and ln.strip()]
         topics = [t for t in (p.get("topics") or []) if isinstance(t, str) and t.strip()]
         topic = topics[i % len(topics)] if topics else "the whole vibe"
+        lingo = [w for w in (p.get("lingo") or []) if isinstance(w, str) and w.strip()]
+        slang = lingo[i % len(lingo)] if lingo else "listen"
         img_idx = i % n_imgs
 
         if i == 0:
-            raw = f"Look at {guest} up on the big screen — I've seen better lighting in a DMV waiting room, and the expression says 'I definitely didn't read the terms of service.'"
+            raw = (
+                f"Hold the applause — {guest} just walked onto the big screen with full VIP audacity and zero backup plan, looking like somebody clicked 'surprise me' on a character creator."
+                if is_premium else
+                f"Look at {guest} up on the big screen — I've seen better lighting in a DMV waiting room, and the expression says 'I definitely didn't read the terms of service.'"
+            )
         elif i == 1 and hook:
-            raw = f"Hold up, {guest}: {hook}? You really handed us that backstory and expected mercy from {pname}? That's like bringing gasoline to a barbecue."
+            raw = (
+                f"Wait a second, {guest}: '{hook}'? {slang} — you handed {pname} that entire storyline on a silver platter and expected a gentle toast? That's not a backstory, that's Exhibit A."
+                if is_premium else
+                f"Hold up, {guest}: {hook}? You really handed us that backstory and expected mercy from {pname}? That's like bringing gasoline to a barbecue."
+            )
         elif i == 2 and punchlines:
-            raw = f"For real though, {guest} — {punchlines[0]} And looking at photo {img_idx + 1}, you posed like somebody just yelled 'act natural' for the first time in your life."
+            raw = (
+                f"Real talk, {guest} — {punchlines[0]} Even in photo {img_idx + 1}, that pose screams 'I rehearsed this in the bathroom mirror and still lost the argument.'"
+                if is_premium else
+                f"For real though, {guest} — {punchlines[0]} And looking at photo {img_idx + 1}, you posed like somebody just yelled 'act natural' for the first time in your life."
+            )
         elif i % 4 == 3:
-            raw = f"Can we zoom in on {guest}'s posture in shot {img_idx + 1}? That's pure 'I spent forty minutes picking an outfit just to pretend I threw it on'{style_hint}."
+            raw = (
+                f"Zoom all the way in on frame {img_idx + 1}: {guest} has the exact posture of someone who says 'no worries!' in an email while plotting revenge{style_hint}."
+                if is_premium else
+                f"Can we zoom in on {guest}'s posture in shot {img_idx + 1}? That's pure 'I spent forty minutes picking an outfit just to pretend I threw it on'{style_hint}."
+            )
         elif len(punchlines) > 1 and i % 3 == 1:
-            raw = f"{guest}, {punchlines[1]} Every time you bring up {topic}, the whole room checks their watch to see if it's a TED Talk or a cry for help."
+            raw = (
+                f"{guest}, {punchlines[1]} Every time {topic} comes up around you, the group chat mutes itself for twenty minutes out of pure self-defense."
+                if is_premium else
+                f"{guest}, {punchlines[1]} Every time you bring up {topic}, the whole room checks their watch to see if it's a TED Talk or a cry for help."
+            )
         elif i == count - 1:
-            raw = f"Alright {guest}, all love at the end of the night — you took the heat like a champ, even if that camera roll is never recovering from tonight!"
+            raw = (
+                f"Give it up for {guest} — took {heat} heat from {pname} and the whole panel without blinking, even if that camera roll just filed for witness protection!"
+                if is_premium else
+                f"Alright {guest}, all love at the end of the night — you took the heat like a champ, even if that camera roll is never recovering from tonight!"
+            )
         else:
-            raw = f"Honestly {guest}, looking at frame {img_idx + 1} with that confident smirk — you look like the final boss of ignoring good advice about {topic}."
+            raw = (
+                f"Honestly {guest}, in shot {img_idx + 1} with that smirk — {slang}, you look like the reigning undefeated champion of ignoring good advice about {topic}."
+                if is_premium else
+                f"Honestly {guest}, looking at frame {img_idx + 1} with that confident smirk — you look like the final boss of ignoring good advice about {topic}."
+            )
 
         beats.append({
             "persona_id": p["id"],
             "type": "joke" if i < count - 1 else "closer",
             "text": _clean_text(raw, off_limits, adult),
             "emotion": emotions[i % len(emotions)],
-            "delivery": f"{heat} roast delivery, land the punchline cleanly",
-            "laugh_after": "explosive" if i == count - 1 else laughs[i % len(laughs)],
+            "delivery": f"{heat} {'premium showcase' if is_premium else 'roast'} delivery, land the punchline cleanly",
+            "laugh_after": "explosive" if i == count - 1 else (laughs[(i + 1) % len(laughs)] if is_premium else laughs[i % len(laughs)]),
             "reaction": "cheer" if i == count - 1 else reactions[i % len(reactions)],
-            "pause_before_ms": 220,
-            "pause_after_ms": 280,
+            "pause_before_ms": 200 if is_premium else 220,
+            "pause_after_ms": 260 if is_premium else 280,
             "image_index": img_idx,
+            "premium_voice": bool(premium_voice),
+            "roast_tier": roast_tier,
             "_standalone": True,
             "_sandbox_preview": True,
         })
@@ -246,7 +281,7 @@ def synthesize_sandbox_audio(text: str, persona_id: str, persona_meta: Optional[
         0.55 * np.sin(phase)
         + 0.25 * np.sin(2.0 * phase)
         + 0.12 * np.sin(3.0 * phase)
-    ) * envelope * 0.16
+    ) * envelope * 0.03
 
     pcm = np.clip(signal, -0.95, 0.95).astype("<f4").tobytes()
     proc = subprocess.run(

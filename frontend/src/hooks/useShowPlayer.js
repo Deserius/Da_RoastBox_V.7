@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { mediaObjectUrl } from "@/lib/media";
 import { crowd } from "@/lib/crowdEngine";
 import { claimAudioFocus, releaseAudioFocus } from "@/lib/audioFocus";
-import { isBrowserSpeechSupported, speakWithBrowserVoice, stopBrowserSpeech, warmBrowserVoices } from "@/lib/sandboxSpeech";
+import { isBrowserSpeechSupported, speakWithBrowserVoice, stopBrowserSpeech, unlockBrowserSpeech, warmBrowserVoices } from "@/lib/sandboxSpeech";
 
 const wait = (ms, run) => new Promise((resolve) => {
   if (run.stopped) { resolve(); return; }
@@ -33,7 +33,7 @@ const loadVoice = async (beat, run) => {
   }
 };
 
-const speakSandbox = (beat, personaMeta, index, run, onUnblocked) => new Promise((resolve) => {
+const speakSandbox = (beat, personaMeta, index, run, onBlocked, onUnblocked) => new Promise((resolve) => {
   const words = (beat.text || "").trim().split(/\s+/).filter(Boolean).length;
   const estMs = Math.max(1400, Math.min(12000, words * 330));
   let finished = false;
@@ -46,26 +46,46 @@ const speakSandbox = (beat, personaMeta, index, run, onUnblocked) => new Promise
     if (run.speech?.index === index) run.speech.finished = true;
     resolve();
   };
+  const fallbackTimed = () => {
+    if (finished || run.stopped) return;
+    cancelSpeech?.();
+    onUnblocked?.();
+    run.audio = null;
+    run.speech = { index, audio: null, startedAt: performance.now(), durationMs: estMs, finished: false };
+    wait(estMs, run).then(done);
+  };
   run.resolveSpeech = () => {
     cancelSpeech?.();
     done();
   };
-  run.audio = null;
-  run.speech = { index, audio: null, startedAt: null, durationMs: estMs, finished: false };
-  onUnblocked?.();
-  cancelSpeech = speakWithBrowserVoice({
-    text: beat.text,
-    personaId: beat.introduced_persona_id || beat.persona_id,
-    personaMeta,
-    emotion: beat.emotion,
-    rapidFire: !!beat.rapid_fire,
-    onStart: () => {
-      if (!finished && run.speech?.index === index && run.speech.startedAt === null) {
-        run.speech.startedAt = performance.now();
-      }
-    },
-    onDone: done,
-  });
+  const attempt = () => {
+    if (finished || run.stopped) return;
+    run.retrySpeech = null;
+    run.audio = null;
+    run.speech = { index, audio: null, startedAt: null, durationMs: estMs, finished: false };
+    cancelSpeech = speakWithBrowserVoice({
+      text: beat.text,
+      personaId: beat.introduced_persona_id || beat.persona_id,
+      personaMeta,
+      emotion: beat.emotion,
+      rapidFire: !!beat.rapid_fire,
+      premiumVoice: !!beat.premium_voice,
+      onStart: () => {
+        onUnblocked?.();
+        if (!finished && run.speech?.index === index && run.speech.startedAt === null) {
+          run.speech.startedAt = performance.now();
+        }
+      },
+      onBlocked: index === 0 ? () => {
+        if (finished || run.stopped) return;
+        run.retrySpeech = attempt;
+        run.skipSpeech = fallbackTimed;
+        onBlocked?.();
+      } : undefined,
+      onDone: done,
+    });
+  };
+  attempt();
 });
 
 const speak = (audio, beat, index, run, onMediaError, onBlocked, onUnblocked) => new Promise((resolve) => {
@@ -161,6 +181,7 @@ export function useShowPlayer({ personaById = {}, onBeatDone, onFinish, onReacti
     if (!run || run.stopped || !run.retrySpeech) return;
     // Both the Web Audio context and the blocked voice are resumed by this tap.
     crowd.unlock();
+    unlockBrowserSpeech();
     setNeedsAudioTap(false);
     run.retrySpeech();
   }, []);
@@ -223,7 +244,7 @@ export function useShowPlayer({ personaById = {}, onBeatDone, onFinish, onReacti
       if (voice?.sandboxSpeech) {
         const speakerId = beat.introduced_persona_id || beat.persona_id;
         const speakerMeta = cbRef.current.personaById?.[speakerId] || cbRef.current.personaById?.[beat.persona_id];
-        await speakSandbox(beat, speakerMeta, i, run, () => setNeedsAudioTap(false));
+        await speakSandbox(beat, speakerMeta, i, run, () => setNeedsAudioTap(true), () => setNeedsAudioTap(false));
       } else {
         await speak(voice?.audio, beat, i, run, onVoiceError,
           () => setNeedsAudioTap(true), () => setNeedsAudioTap(false));

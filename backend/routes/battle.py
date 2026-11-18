@@ -93,6 +93,7 @@ async def generate_battle(
 
     img_bytes, img_types = await eng.read_images(images)
     byok_openai, byok_eleven = eng.user_byok(current_user)
+    byok_openrouter = eng.user_byok_openrouter(current_user)
     if current_user.is_preview and (not byok_openai or ROAST_WRITER_PROVIDER == "openrouter"):
         await consume_preview_hosted("show")
     a, b = fighters
@@ -127,6 +128,7 @@ async def generate_battle(
                                     expected_beats=battle_beats(rounds),
                                     adult=adult_language, off_limits=off_limits,
                                     persona_portraits=portraits, on_beat=_on_beat,
+                                    byok_openrouter=byok_openrouter,
                                     sandbox_context={
                                         "subject_name": subject_name,
                                         "user_context": user_context,

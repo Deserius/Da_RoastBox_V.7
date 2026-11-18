@@ -99,6 +99,10 @@ def user_byok(user: User) -> Tuple[Optional[str], Optional[str]]:
     return openai_key, eleven_key
 
 
+def user_byok_openrouter(user: User) -> Optional[str]:
+    return decrypt(user.openrouter_key_encrypted) if getattr(user, "has_byok_openrouter", False) else None
+
+
 def has_premium_voices(user: User) -> bool:
     return user.premium_voices_unlocked or user.plan_tier in ("plus", "vip")
 

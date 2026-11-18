@@ -6,7 +6,7 @@ import { mediaObjectUrl } from "@/lib/media";
 import { useAuth } from "@/lib/AuthContext";
 import { PersonaFavoriteButton } from "@/components/PersonaFavoriteButton";
 import { watchNarration } from "@/lib/audioFocus";
-import { isBrowserSpeechSupported, speakWithBrowserVoice, stopBrowserSpeech } from "@/lib/sandboxSpeech";
+import { isBrowserSpeechSupported, speakWithBrowserVoice, stopBrowserSpeech, unlockBrowserSpeech } from "@/lib/sandboxSpeech";
 
 export const PersonaProfileDialog = ({ persona: p, onClose, onPick, pickLabel, returnFocus }) => {
   const { user } = useAuth();
@@ -77,6 +77,7 @@ export const PersonaProfileDialog = ({ persona: p, onClose, onPick, pickLabel, r
       return;
     }
     release();
+    unlockBrowserSpeech();
     const run = sequence.current;
     const abort = new AbortController();
     abortRef.current = abort;

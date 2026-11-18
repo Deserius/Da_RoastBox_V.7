@@ -39,8 +39,10 @@ class User(BaseModel):
     # BYOK
     has_byok_openai: bool = False
     has_byok_elevenlabs: bool = False
+    has_byok_openrouter: bool = False
     openai_key_encrypted: Optional[str] = None
     elevenlabs_key_encrypted: Optional[str] = None
+    openrouter_key_encrypted: Optional[str] = None
     created_at: str = Field(default_factory=_now)
 
 

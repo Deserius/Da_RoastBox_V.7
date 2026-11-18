@@ -24,6 +24,7 @@ export default function CheckoutSuccess() {
           await refresh();
           setState({
             status: "paid",
+            test_mode: !!data.test_mode,
             credits_added: data.credits_added,
             balance: data.credits_balance,
             pack_type: data.pack_type,
@@ -73,6 +74,7 @@ export default function CheckoutSuccess() {
         {state.status === "checking" && <><div className="spinner" /> <p>Confirming your payment…</p></>}
         {state.status === "paid" && (
           <>
+            {state.test_mode && <p className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>🧪 Stripe Test Mode purchase simulated in workspace preview.</p>}
             {renderPaid()}
             <button className="btn-primary" onClick={() => navigate("/studio")} data-testid="goto-studio-btn">Start Roasting</button>
           </>

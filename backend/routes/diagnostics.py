@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from auth_deps import get_optional_user
 from models import User
 
-from config import (APP_VERSION, EMERGENT_LLM_KEY, OPENAI_API_KEY, STRIPE_API_KEY, ELEVENLABS_API_KEY,
+from config import (APP_VERSION, EMERGENT_LLM_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, STRIPE_API_KEY,
+                    ELEVENLABS_API_KEY, STRIPE_TEST_ONLY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+                    ROAST_WRITER_PROVIDER, ROAST_WRITER_PROFILE, ROAST_WRITER_MODEL,
                     ALLOW_DEV_LOGIN, ALLOW_SOURCE_DOWNLOAD, ENABLE_PREVIEW_LOGIN,
                     ALLOW_PREVIEW_HOSTED_AI, PREVIEW_HOSTED_DAILY_SHOW_LIMIT, PREVIEW_HOSTED_DAILY_VOICE_LIMIT,
-                    PREVIEW_UNLIMITED_CREDITS,
+                    PREVIEW_UNLIMITED_CREDITS, PREVIEW_SANDBOX_FALLBACK, ALLOW_PREVIEW_TEST_PAYMENTS,
                     STORAGE_BACKEND, STRIPE_WEBHOOK_SECRET, AUDIO_DIR, DATA_DIR)
 from db import db
 from routes.personas import all_personas
@@ -119,8 +121,14 @@ async def diagnostics(deep: bool = False, user: Optional[User] = Depends(get_opt
         "config": {
             "emergent_llm_key": bool(EMERGENT_LLM_KEY),
             "openai_hosted_key": bool(OPENAI_API_KEY),
+            "openrouter_hosted_key": bool(OPENROUTER_API_KEY),
             "stripe_api_key": bool(STRIPE_API_KEY),
+            "stripe_test_only": STRIPE_TEST_ONLY,
             "elevenlabs_hosted_key": bool(ELEVENLABS_API_KEY),
+            "google_oauth_configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
+            "roast_writer_provider": ROAST_WRITER_PROVIDER,
+            "roast_writer_profile": ROAST_WRITER_PROFILE,
+            "roast_writer_model": ROAST_WRITER_MODEL,
             "dev_login_enabled": ALLOW_DEV_LOGIN,
             "source_download_enabled": ALLOW_SOURCE_DOWNLOAD,
             "preview_login_enabled": ENABLE_PREVIEW_LOGIN,
@@ -128,6 +136,12 @@ async def diagnostics(deep: bool = False, user: Optional[User] = Depends(get_opt
             "preview_hosted_daily_show_limit": "unlimited" if PREVIEW_HOSTED_DAILY_SHOW_LIMIT < 0 else PREVIEW_HOSTED_DAILY_SHOW_LIMIT,
             "preview_hosted_daily_voice_limit": "unlimited" if PREVIEW_HOSTED_DAILY_VOICE_LIMIT < 0 else PREVIEW_HOSTED_DAILY_VOICE_LIMIT,
             "preview_unlimited_credits": PREVIEW_UNLIMITED_CREDITS,
+            "preview_sandbox_fallback": PREVIEW_SANDBOX_FALLBACK,
+            "test_payments_enabled": bool(
+                ALLOW_PREVIEW_TEST_PAYMENTS
+                and STRIPE_TEST_ONLY
+                and STRIPE_API_KEY.startswith(("sk_test_", "rk_test_"))
+            ),
             "storage_backend": STORAGE_BACKEND,
             "stripe_webhook_secret": bool(STRIPE_WEBHOOK_SECRET),
             "audio_cache_writable": AUDIO_DIR.exists(),

@@ -142,6 +142,9 @@ PREVIEW_UNLIMITED_CREDITS = _flag("PREVIEW_UNLIMITED_CREDITS")
 # Off by default: only enable inside a network-sandboxed workspace preview so
 # roasts, battles, and voice samples still run when outbound AI APIs are blocked.
 PREVIEW_SANDBOX_FALLBACK = _flag("PREVIEW_SANDBOX_FALLBACK")
+# Off by default: only enable in staging/workspace preview to test Stripe test
+# checkout flows with preview accounts when STRIPE_TEST_ONLY=true.
+ALLOW_PREVIEW_TEST_PAYMENTS = _flag("ALLOW_PREVIEW_TEST_PAYMENTS")
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "emergent").strip().lower()
 if STORAGE_BACKEND not in ("emergent", "local", "vercel_blob"):
     raise ValueError("STORAGE_BACKEND must be emergent, local or vercel_blob")

@@ -4,6 +4,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { useToast } from "@/lib/ToastContext";
 import { crowd } from "@/lib/crowdEngine";
+import { unlockBrowserSpeech } from "@/lib/sandboxSpeech";
 import { ShowTranscript } from "@/components/ShowTranscript";
 import { PersonaBrowser } from "@/components/PersonaBrowser";
 import { RoastTheater } from "@/components/theater/RoastTheater";
@@ -91,6 +92,7 @@ export default function BattlePage() {
 
   const fight = async () => {
     crowd.unlock();
+    unlockBrowserSpeech();
     setTheater(false);
     setBusy(true); setShow(null); setLive({}); setRevealed(false);
     ringRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });

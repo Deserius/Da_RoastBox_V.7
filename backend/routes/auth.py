@@ -186,6 +186,7 @@ async def me(current_user: User = Depends(get_current_user)):
         "is_preview": current_user.is_preview,
         "has_byok_openai": current_user.has_byok_openai,
         "has_byok_elevenlabs": current_user.has_byok_elevenlabs,
+        "has_byok_openrouter": current_user.has_byok_openrouter,
         "premium_personas_unlocked": current_user.premium_personas_unlocked,
         "premium_voices_unlocked": current_user.premium_voices_unlocked,
         "roast_battle_unlocked": current_user.roast_battle_unlocked,

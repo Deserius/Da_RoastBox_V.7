@@ -4,6 +4,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { useToast } from "@/lib/ToastContext";
 import { crowd } from "@/lib/crowdEngine";
+import { unlockBrowserSpeech } from "@/lib/sandboxSpeech";
 import { ShowTranscript } from "@/components/ShowTranscript";
 import { ShareButton } from "@/components/ShareButton";
 import { ReelButton } from "@/components/ReelButton";
@@ -118,6 +119,7 @@ export default function StudioPage() {
     if (!images.length) return toast("Step 1: add at least 1 photo of the victim", "error");
     if (!free && (user?.credits ?? 0) < cost) { toast(`Need ${cost} credits, you have ${user?.credits ?? 0}`, "error"); navigate("/credits"); return; }
     crowd.unlock();
+    unlockBrowserSpeech();
     setBusy(true); setResult(null); setTheater(false);
     const fd = new FormData();
     fd.append("persona_ids", selected.join(","));

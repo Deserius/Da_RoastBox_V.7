@@ -101,12 +101,15 @@ except ImportError:
                 metadata=dict(obj.get("metadata") or {}) if isinstance(obj, dict) else dict(getattr(obj, "metadata", {}) or {}),
             )
 
+from uuid import uuid4
 from auth_deps import get_current_user, active_plan_tier
 from models import User, PaymentTransaction, CreditTransaction
 from db import users_collection, payments_collection, credits_collection, roasts_collection
-from config import STRIPE_API_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_TEST_ONLY, APP_BASE_URL
+from config import (STRIPE_API_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_TEST_ONLY,
+                    APP_BASE_URL, ALLOW_PREVIEW_TEST_PAYMENTS)
 from services.pricing import PRODUCT_CATALOG, ROAST_COSTS, VIP_CREDIT_DISCOUNT, compute_roast_cost  # noqa: F401
 from services.roast_engine import VISIBLE_BILLING
+from services.sandbox_preview import is_network_connection_error
 
 log = logging.getLogger(__name__)
 # Stripe's bundled CA file can't verify the Emergent Stripe proxy; use the system/certifi bundle.
@@ -190,16 +193,25 @@ async def account_activity(response: Response, current_user: User = Depends(get_
     return {"payments": payments, "credit_activity": credit_events, "shows": shows, "limit": limit}
 
 
+def _test_payments_ready() -> bool:
+    return bool(
+        ALLOW_PREVIEW_TEST_PAYMENTS
+        and STRIPE_TEST_ONLY
+        and STRIPE_API_KEY.startswith(("sk_test_", "rk_test_"))
+    )
+
+
 @router.post("/checkout")
 async def create_checkout(body: CheckoutRequest, request: Request, current_user: User = Depends(get_current_user)):
-    if current_user.is_preview:
+    preview_test_mode = _test_payments_ready()
+    if current_user.is_preview and not preview_test_mode:
         raise HTTPException(status_code=403, detail="Preview accounts cannot make purchases. Sign in with a verified account for checkout.")
     pack = PRODUCT_CATALOG.get(body.pack_id)
     if not pack:
         raise HTTPException(status_code=400, detail="Invalid pack")
     if pack["type"] == "plus_subscription" and current_user.plan_tier == "vip":
         raise HTTPException(status_code=400, detail="Your active VIP pass already includes Plus. Choose VIP to extend it.")
-    if not STRIPE_API_KEY or not STRIPE_WEBHOOK_SECRET:
+    if not preview_test_mode and (not STRIPE_API_KEY or not STRIPE_WEBHOOK_SECRET):
         raise HTTPException(status_code=503, detail="Stripe checkout requires both STRIPE_API_KEY and STRIPE_WEBHOOK_SECRET on the server.")
 
     # VIP gets 10% off credit packs
@@ -227,27 +239,46 @@ async def create_checkout(body: CheckoutRequest, request: Request, current_user:
         },
     )
 
-    try:
-        sc = _checkout()
-        resp = await sc.create_checkout_session(req)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("Stripe checkout error: %s", e)
-        raise HTTPException(status_code=502, detail="Stripe checkout is temporarily unavailable. Please try again.")
+    sandbox_test = False
+    session_id = ""
+    checkout_url = ""
+    if STRIPE_API_KEY and STRIPE_WEBHOOK_SECRET:
+        try:
+            sc = _checkout()
+            resp = await sc.create_checkout_session(req)
+            session_id = resp.session_id
+            checkout_url = resp.url
+        except HTTPException:
+            raise
+        except Exception as e:
+            if preview_test_mode and is_network_connection_error(e):
+                log.warning("Stripe API unreachable in preview sandbox (%s); using Stripe test checkout simulation.", type(e).__name__)
+                sandbox_test = True
+            else:
+                log.exception("Stripe checkout error: %s", e)
+                raise HTTPException(status_code=502, detail="Stripe checkout is temporarily unavailable. Please try again.")
+    elif preview_test_mode:
+        sandbox_test = True
+
+    if sandbox_test:
+        session_id = f"cs_test_sandbox_{uuid4().hex[:24]}"
+        checkout_url = f"{origin}/credits/success?session_id={session_id}&test_mode=1"
 
     tx = PaymentTransaction(
         user_id=current_user.id,
-        stripe_session_id=resp.session_id,
+        stripe_session_id=session_id,
         amount_usd=amount,
         credits=pack.get("credits", 0),
         pack_id=body.pack_id,
         pack_type=pack["type"],
         payment_status="pending",
     )
-    await payments_collection.insert_one(tx.model_dump())
+    doc = tx.model_dump()
+    if sandbox_test:
+        doc["sandbox_test_mode"] = True
+    await payments_collection.insert_one(doc)
 
-    return {"checkout_url": resp.url, "session_id": resp.session_id}
+    return {"checkout_url": checkout_url, "session_id": session_id, "test_mode": sandbox_test}
 
 
 def _extend_plan(user_doc: dict, days: int) -> str:
@@ -408,16 +439,23 @@ async def payment_status(session_id: str, current_user: User = Depends(get_curre
     if txn["user_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Not your transaction")
 
-    try:
-        sc = _checkout()
-        status = await sc.get_checkout_status(session_id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("Stripe status error: %s", e)
-        raise HTTPException(status_code=502, detail="Could not check Stripe payment status. Please try again.")
+    if txn.get("sandbox_test_mode") and _test_payments_ready():
+        payment_status_str = "paid"
+        amount_total = int(round(float(txn.get("amount_usd") or 0) * 100))
+        currency = "usd"
+    else:
+        try:
+            sc = _checkout()
+            status = await sc.get_checkout_status(session_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("Stripe status error: %s", e)
+            raise HTTPException(status_code=502, detail="Could not check Stripe payment status. Please try again.")
 
-    payment_status_str = (status.payment_status or "unknown").lower()
+        payment_status_str = (status.payment_status or "unknown").lower()
+        amount_total = status.amount_total
+        currency = status.currency
 
     if payment_status_str == "paid" and txn["payment_status"] != "paid":
         await _apply_paid_purchase(current_user.id, session_id)
@@ -425,10 +463,11 @@ async def payment_status(session_id: str, current_user: User = Depends(get_curre
     updated_user = await users_collection.find_one({"id": current_user.id}) or {}
     return {
         "payment_status": payment_status_str,
+        "test_mode": bool(txn.get("sandbox_test_mode")),
         "pack_type": txn.get("pack_type") or "credits",
         "pack_name": PRODUCT_CATALOG.get(txn["pack_id"], {}).get("name", txn["pack_id"]),
-        "amount_total": status.amount_total,
-        "currency": status.currency,
+        "amount_total": amount_total,
+        "currency": currency,
         "credits_added": txn.get("credits", 0) if payment_status_str == "paid" else 0,
         "credits_balance": updated_user.get("credits", 0),
         "premium_personas_unlocked": updated_user.get("premium_personas_unlocked", False),

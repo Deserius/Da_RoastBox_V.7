@@ -634,16 +634,18 @@ async def _generate_script_text(client, *, model, messages, max_tokens, routing,
 
 
 
-def _creative_client():
-    if not OPENROUTER_API_KEY or not ROAST_WRITER_MODEL:
+def _creative_client(byok_openrouter: Optional[str] = None):
+    key = (byok_openrouter or "").strip() or OPENROUTER_API_KEY
+    if not key or not ROAST_WRITER_MODEL:
         raise RuntimeError("OpenRouter writer is selected but not configured")
     # Fixed trusted endpoint; do not send an OpenAI BYOK key to a third party.
-    return OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1", timeout=40.0, max_retries=0)
+    return OpenAI(api_key=key, base_url="https://openrouter.ai/api/v1", timeout=40.0, max_retries=0)
 
 
 def _sandbox_fallback_beats(user_block: str, personas: List[Dict], images: List[bytes], *,
                             expected_beats: Optional[int], adult: bool, off_limits: Optional[str],
-                            persona_portraits: List[Dict], sandbox_context: Optional[dict]) -> List[Dict]:
+                            persona_portraits: List[Dict], sandbox_context: Optional[dict],
+                            roast_tier: str = "standard") -> List[Dict]:
     meta = dict(sandbox_context or {})
     is_battle = bool(meta.get("is_battle")) or "ROAST BATTLE" in (user_block or "").upper() or len(persona_portraits) == 2
     is_rap = bool(meta.get("is_rap")) or "RAP BATTLE" in (user_block or "").upper()
@@ -659,6 +661,8 @@ def _sandbox_fallback_beats(user_block: str, personas: List[Dict], images: List[
         is_rap=is_rap,
         comedy_styles=meta.get("comedy_styles"),
         heat=meta.get("heat") or "medium",
+        roast_tier=roast_tier,
+        premium_voice=bool(meta.get("premium_voice")),
     )
 
 
@@ -666,16 +670,18 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
                        byok_key: Optional[str] = None, *, expected_beats: Optional[int] = None,
                        adult: bool = True, off_limits: Optional[str] = None,
                        persona_portraits: Optional[List[Dict]] = None, roast_tier: str = "standard",
-                       on_beat=None, sandbox_context: Optional[dict] = None) -> List[Dict]:
+                       on_beat=None, sandbox_context: Optional[dict] = None,
+                       byok_openrouter: Optional[str] = None) -> List[Dict]:
     """on_beat, when provided, receives each normalized beat as it streams so the
     caller can begin voice work before the whole script has finished."""
     persona_portraits = persona_portraits or []
     pipeline_start = time.monotonic()
+    effective_openrouter_key = (byok_openrouter or "").strip() or OPENROUTER_API_KEY
     # OpenRouter is the default provider, but a missing key must not block a show
     # when an existing OpenAI/Emergent provider is available.
-    if ROAST_WRITER_PROVIDER == "openrouter" and not OPENROUTER_API_KEY:
+    if ROAST_WRITER_PROVIDER == "openrouter" and not effective_openrouter_key:
         log.warning("OpenRouter writer selected without OPENROUTER_API_KEY; using the existing provider")
-    if ROAST_WRITER_PROVIDER == "openrouter" and OPENROUTER_API_KEY:
+    if ROAST_WRITER_PROVIDER == "openrouter" and effective_openrouter_key:
         # The explicit creative profile cannot bypass the free-only spending guard.
         if ROAST_WRITER_PROFILE == "creative" and ROAST_FREE_WRITER_ONLY:
             raise RuntimeError("Creative profile requires free-only mode to be disabled")
@@ -695,7 +701,7 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
         if ROAST_FREE_WRITER_ONLY and any(not m.endswith(":free") for m in (primary, backup) if m):
             raise RuntimeError("Free-only writer requires :free OpenRouter model IDs")
         try:
-            primary_client = _creative_client()
+            primary_client = _creative_client(byok_openrouter)
         except Exception as e:
             log.warning("OpenRouter writer configuration failed (%s)", type(e).__name__)
             primary_client = None
@@ -710,7 +716,8 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
             log.warning("AI vision endpoint unreachable; using offline sandbox preview script.")
             return _sandbox_fallback_beats(
                 user_block, personas, images, expected_beats=expected_beats, adult=adult,
-                off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context)
+                off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context,
+                roast_tier=roast_tier)
         guest_evidence = [o for o in observations if o["image_index"] < len(images)]
         portrait_evidence = [{"persona_id": persona_portraits[o["image_index"] - len(images)]["id"], "details": o["details"]}
                              for o in observations if len(images) <= o["image_index"] < len(visual_bytes)]
@@ -819,7 +826,8 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
             log.warning("AI writer endpoints unreachable; using offline sandbox preview script.")
             return _sandbox_fallback_beats(
                 user_block, personas, images, expected_beats=expected_beats, adult=adult,
-                off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context)
+                off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context,
+                roast_tier=roast_tier)
         raise RuntimeError("Script did not pass local checks or configured writers failed")
 
     client = get_client(byok_key)
@@ -852,7 +860,8 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
         log.warning("Direct AI endpoints unreachable; using offline sandbox preview script.")
         return _sandbox_fallback_beats(
             user_block, personas, images, expected_beats=expected_beats, adult=adult,
-            off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context)
+            off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context,
+            roast_tier=roast_tier)
     if not text:
         raise RuntimeError("All roast models refused or failed. Try different context / subject.")
     # Do not silently make another paid critique/rewrite call. Existing provider

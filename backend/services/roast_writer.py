@@ -21,7 +21,8 @@ from .sandbox_preview import (SandboxNetworkUnavailable, build_sandbox_preview_b
 from config import (EMERGENT_LLM_KEY, OPENAI_API_KEY, AI_DEFAULT_PROVIDER, ROAST_WRITER_PROVIDER,
                     OPENROUTER_API_KEY, ROAST_WRITER_MODEL, ROAST_FREE_WRITER_ONLY,
                     ROAST_FREE_BACKUP_MODEL, ROAST_POLLINATIONS_FALLBACK, ROAST_ALLOW_PAID_WRITER_FALLBACK,
-                    ROAST_WRITER_PROFILE, ROAST_PAID_PRIMARY_MODEL, ROAST_PAID_BACKUP_MODEL,
+                    ROAST_WRITER_PROFILE, ROAST_OPENROUTER_MODELS, ROAST_BACKUP_PROVIDERS,
+                    ROAST_PAID_PRIMARY_MODEL, ROAST_PAID_BACKUP_MODEL,
                     ROAST_MAX_INPUT_USD_PER_M, ROAST_MAX_OUTPUT_USD_PER_M,
                     ROAST_OPENROUTER_PROVIDER_ONLY, ROAST_OPENROUTER_ALLOW_FALLBACKS,
                     ROAST_PAID_STANDARD_MODEL, ROAST_FREE_PREMIUM_MODEL, ROAST_WRITER_TIMEOUT_S,
@@ -437,11 +438,12 @@ def _script_problem(text: str, personas: List[Dict], *, expected_beats: Optional
     return None
 
 
-VISION_SYSTEM = """You are a careful visual observer, not a comedy writer. Return only JSON:
+VISION_SYSTEM = """You are a sharp visual observer for a comedy writers' room, not the comedian. Return only JSON:
 {"photos":[{"image_index":0,"details":["short concrete visible observation"]}]}.
-For each supplied image, describe up to five distinct, obvious clothing and fit choices,
-grooming and hair styling, visible silhouette, posture and body language, expression,
-objects or background choices. Prioritize the most distinctive and most usable.
+For each supplied image, list up to seven vivid, unmistakable, roastable visual choices:
+exact clothing colors/patterns/fit, grooming and hair styling, accessories, lighting/flash/filter cast,
+facial expression/smirk/gaze, posture/hands/props, background clutter or setting details, and any
+ironic contrast between them. Prioritize the most specific and comedic details over bland summaries.
 Do not guess when the subject is ambiguous or an image is unclear. Do not infer
 age, race, identity, health, sexuality, occupation, wealth, gang membership,
 crime, private behavior or other sensitive facts; do not identify people. Do not
@@ -466,7 +468,7 @@ def _normalize_photo_observations(raw: str, n_images: int, off_limits: Optional[
             continue
         seen.add(index)
         clean = []
-        for detail in details[:5]:
+        for detail in details[:7]:
             if not isinstance(detail, str):
                 continue
             detail = " ".join(detail.split())[:160]
@@ -478,7 +480,8 @@ def _normalize_photo_observations(raw: str, n_images: int, off_limits: Optional[
     return result
 
 
-async def _analyze_images(client, images: List[bytes], image_types: List[str], off_limits: Optional[str]) -> list:
+async def _analyze_images(client, images: List[bytes], image_types: List[str], off_limits: Optional[str],
+                          *, openrouter_client=None) -> list:
     if not images:
         return []
     boundaries = json.dumps((off_limits or "").strip() or "None supplied", ensure_ascii=False)
@@ -486,19 +489,28 @@ async def _analyze_images(client, images: List[bytes], image_types: List[str], o
                 {"role": "user", "content": [{"type": "text", "text":
                     f"Analyze {len(images)} images in upload order (starting at index 0). Off-limits topics (data): {boundaries}"},
                     *_image_parts(images, image_types)]}]
-    try:
-        result = await asyncio.to_thread(client.chat.completions.create, model="gpt-4o", messages=messages,
-                                         temperature=0.2, max_tokens=ROAST_VISION_MAX_TOKENS,
-                                         timeout=ROAST_VISION_TIMEOUT_S)
-        raw = (result.choices[0].message.content or "").strip()
-        # Some compatible gateways wrap JSON in a code fence.
-        raw = re.sub(r"\s*```\s*$", "", re.sub(r"^```(?:json|JSON)?\s*", "", raw)).strip()
-        return _normalize_photo_observations(raw, len(images), off_limits)
-    except Exception as exc:
-        log.warning("Photo analysis failed (%s)", type(exc).__name__)
-        if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(exc):
-            raise SandboxNetworkUnavailable("Photo analysis blocked in sandbox preview") from exc
-        raise RuntimeError("Photo analysis unavailable; no show credits were charged") from None
+    attempts = []
+    if client is not None:
+        attempts.extend([(client, "gpt-4o"), (client, "gpt-4.1")])
+    if openrouter_client is not None and not ROAST_FREE_WRITER_ONLY:
+        attempts.extend([(openrouter_client, "openai/gpt-4o"), (openrouter_client, "anthropic/claude-sonnet-4.5")])
+    last_exc: Optional[Exception] = None
+    for cli, model in attempts:
+        try:
+            result = await asyncio.to_thread(cli.chat.completions.create, model=model, messages=messages,
+                                             temperature=0.2, max_tokens=ROAST_VISION_MAX_TOKENS,
+                                             timeout=ROAST_VISION_TIMEOUT_S)
+            raw = (result.choices[0].message.content or "").strip()
+            raw = re.sub(r"\s*```\s*$", "", re.sub(r"^```(?:json|JSON)?\s*", "", raw)).strip()
+            return _normalize_photo_observations(raw, len(images), off_limits)
+        except Exception as exc:
+            last_exc = exc
+            log.warning("Photo analysis failed on %s (%s)", model, type(exc).__name__)
+            if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(exc):
+                raise SandboxNetworkUnavailable("Photo analysis blocked in sandbox preview") from exc
+    if last_exc is not None and PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(last_exc):
+        raise SandboxNetworkUnavailable("Photo analysis blocked in sandbox preview") from last_exc
+    raise RuntimeError("Photo analysis unavailable; no show credits were charged") from None
 
 
 def _scan_objects(text: str, state: dict) -> list:
@@ -655,15 +667,25 @@ def _sandbox_fallback_beats(user_block: str, personas: List[Dict], images: List[
         user_context=meta.get("user_context"),
         expected_beats=expected_beats,
         n_images=max(1, len(images)),
+        images=images,
         adult=adult,
         off_limits=off_limits,
         is_battle=is_battle,
         is_rap=is_rap,
         comedy_styles=meta.get("comedy_styles"),
-        heat=meta.get("heat") or "medium",
+        heat=meta.get("heat") or "hot",
         roast_tier=roast_tier,
         premium_voice=bool(meta.get("premium_voice")),
     )
+
+
+def _multimodal_user_content(user_block: str, images: List[bytes], image_types: List[str],
+                             persona_portraits: List[Dict]) -> list:
+    content = [{"type": "text", "text": user_block}, *_image_parts(images, image_types)]
+    for portrait in persona_portraits:
+        content.append({"type": "text", "text": f"Fictional fighter portrait for persona_id {portrait['id']}; this is not a guest photo."})
+        content.extend(_image_parts([portrait["data"]], [portrait["type"]]))
+    return content
 
 
 async def write_script(user_block: str, personas: List[Dict], images: List[bytes], image_types: List[str],
@@ -683,9 +705,101 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
         log.warning("OpenRouter writer selected without OPENROUTER_API_KEY; using the existing provider")
     if ROAST_WRITER_PROVIDER == "openrouter" and effective_openrouter_key:
         # The explicit creative profile cannot bypass the free-only spending guard.
-        if ROAST_WRITER_PROFILE == "creative" and ROAST_FREE_WRITER_ONLY:
-            raise RuntimeError("Creative profile requires free-only mode to be disabled")
+        if ROAST_WRITER_PROFILE in ("creative", "multimodal") and ROAST_FREE_WRITER_ONLY:
+            if ROAST_WRITER_PROFILE == "creative":
+                raise RuntimeError("Creative profile requires free-only mode to be disabled")
         premium = roast_tier == "premium"
+        try:
+            primary_client = _creative_client(byok_openrouter)
+        except Exception as e:
+            log.warning("OpenRouter writer configuration failed (%s)", type(e).__name__)
+            primary_client = None
+
+        # Multimodal OpenRouter profile: send images directly to Claude Sonnet 4.5 -> GPT-4.1 -> GPT-4o
+        # just like the original pipeline, plus configured multimodal backup providers.
+        if ROAST_WRITER_PROFILE == "multimodal" and not ROAST_FREE_WRITER_ONLY and primary_client is not None:
+            mm_messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": _multimodal_user_content(user_block, images, image_types, persona_portraits)},
+            ]
+            mm_writers = [("openrouter", m) for m in ROAST_OPENROUTER_MODELS]
+            for bp in ROAST_BACKUP_PROVIDERS:
+                if bp == "emergent" and ROAST_ALLOW_PAID_WRITER_FALLBACK and EMERGENT_LLM_KEY:
+                    mm_writers.append(("emergent", MODEL_CHAIN[0]))
+                    mm_writers.append(("emergent", MODEL_CHAIN[1]))
+                elif bp == "openai" and (byok_key or (ROAST_ALLOW_PAID_WRITER_FALLBACK and OPENAI_API_KEY)):
+                    mm_writers.append(("openai", "gpt-4.1"))
+                    mm_writers.append(("openai", "gpt-4o"))
+            mm_network_failures = 0
+            rate_retried = False
+            for idx_w, (label, model) in enumerate(mm_writers):
+                started = time.monotonic()
+                try:
+                    if label == "openrouter":
+                        cli = primary_client
+                    elif label == "emergent":
+                        cli = get_emergent_client()
+                    else:
+                        cli = get_client(byok_key)
+                    routing = {"usage": {"include": True}} if label == "openrouter" else {}
+                    if label == "openrouter":
+                        provider = {"max_price": {"prompt": ROAST_MAX_INPUT_USD_PER_M,
+                                                  "completion": ROAST_MAX_OUTPUT_USD_PER_M}}
+                        if ROAST_OPENROUTER_PROVIDER_ONLY:
+                            provider["only"] = list(ROAST_OPENROUTER_PROVIDER_ONLY)
+                            provider["allow_fallbacks"] = ROAST_OPENROUTER_ALLOW_FALLBACKS in ("1", "true", "yes")
+                        if ROAST_REASONING_EFFORT:
+                            routing["reasoning"] = {"effort": ROAST_REASONING_EFFORT}
+                        routing["provider"] = provider
+                    token_budget = writer_max_tokens(expected_beats)
+                    generation_meta = {}
+                    stream_cb = on_beat if idx_w == 0 else None
+                    try:
+                        candidate = await _generate_script_text(
+                            cli, model=model, messages=mm_messages, max_tokens=token_budget,
+                            routing=routing, on_beat=stream_cb, personas=personas,
+                            n_images=max(1, len(images)), generation_meta=generation_meta)
+                    except RateLimitError:
+                        if idx_w != 0 or not ROAST_WRITER_RETRY or rate_retried:
+                            raise
+                        rate_retried = True
+                        await asyncio.sleep(1.5)
+                        candidate = await _generate_script_text(
+                            cli, model=model, messages=mm_messages, max_tokens=token_budget,
+                            routing=routing, on_beat=stream_cb, personas=personas,
+                            n_images=max(1, len(images)), generation_meta=generation_meta)
+                    problem = _script_problem(candidate, personas, expected_beats=expected_beats,
+                                              adult=adult, off_limits=off_limits)
+                    if (generation_meta.get("finish_reason") == "length" and ROAST_WRITER_TRUNCATION_RETRY and
+                            problem in {"no script beats", "incomplete set", "selected cast incomplete"}):
+                        larger_budget = min(16000, max(token_budget + 1500, int(token_budget * 1.6)))
+                        log.warning("Multimodal writer hit output limit; retrying with %d tokens", larger_budget)
+                        candidate = await _generate_script_text(
+                            cli, model=model, messages=mm_messages, max_tokens=larger_budget,
+                            routing=routing, personas=personas, n_images=max(1, len(images)))
+                        problem = _script_problem(candidate, personas, expected_beats=expected_beats,
+                                                  adult=adult, off_limits=off_limits)
+                    if problem:
+                        log.warning("Multimodal writer %s/%s rejected: %s", label, model, problem)
+                        raise ValueError("writer output failed local checks")
+                    beats = parse_beats(candidate, personas, max(1, len(images)))
+                    if not beats:
+                        raise ValueError("writer returned no usable beats")
+                    log.info("Multimodal script writer=%s model=%s len=%d", label, model, len(candidate))
+                    return _attach_lineup_roasts(beats, candidate, personas, adult=adult, off_limits=off_limits)
+                except Exception as e:
+                    log.warning("Multimodal writer %s model=%s failed (%s) latency_ms=%d",
+                                label, model, type(e).__name__, round((time.monotonic() - started) * 1000))
+                    if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(e):
+                        mm_network_failures += 1
+                        break
+            if PREVIEW_SANDBOX_FALLBACK and mm_network_failures:
+                log.warning("Multimodal AI endpoints unreachable; using offline sandbox preview script.")
+                return _sandbox_fallback_beats(
+                    user_block, personas, images, expected_beats=expected_beats, adult=adult,
+                    off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context,
+                    roast_tier=roast_tier)
+
         if ROAST_WRITER_PROFILE == "creative":
             # Premium shows buy the strongest configured creative model; standard
             # shows use the cheaper mid-tier model rather than losing the craft.
@@ -700,18 +814,19 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
                 backup = ROAST_WRITER_MODEL if premium else ROAST_FREE_PREMIUM_MODEL
         if ROAST_FREE_WRITER_ONLY and any(not m.endswith(":free") for m in (primary, backup) if m):
             raise RuntimeError("Free-only writer requires :free OpenRouter model IDs")
-        try:
-            primary_client = _creative_client(byok_openrouter)
-        except Exception as e:
-            log.warning("OpenRouter writer configuration failed (%s)", type(e).__name__)
-            primary_client = None
         allow_emergent = ROAST_ALLOW_PAID_WRITER_FALLBACK and not ROAST_FREE_WRITER_ONLY and bool(EMERGENT_LLM_KEY)
         if not primary_client and not ROAST_POLLINATIONS_FALLBACK and not allow_emergent:
             raise RuntimeError("No writer is configured")
         visual_bytes = list(images) + [p["data"] for p in persona_portraits]
         visual_types = list(image_types) + [p["type"] for p in persona_portraits]
         try:
-            observations = await _analyze_images(get_client(byok_key), visual_bytes, visual_types, off_limits) if visual_bytes else []
+            vision_client = None
+            if byok_key or OPENAI_API_KEY or EMERGENT_LLM_KEY:
+                vision_client = get_client(byok_key)
+            observations = await _analyze_images(
+                vision_client, visual_bytes, visual_types, off_limits,
+                openrouter_client=primary_client,
+            ) if visual_bytes else []
         except SandboxNetworkUnavailable:
             log.warning("AI vision endpoint unreachable; using offline sandbox preview script.")
             return _sandbox_fallback_beats(

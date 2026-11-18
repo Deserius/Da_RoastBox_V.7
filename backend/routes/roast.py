@@ -68,13 +68,14 @@ async def generate_roast(
     if not images:
         raise HTTPException(status_code=400, detail="At least one subject image required")
 
+    import config as _cfg
     duration_minutes = max(3, min(10, int(duration_minutes or 3)))
     roast_tier = roast_tier if roast_tier in ("standard", "premium") else "standard"
     cost = compute_roast_cost(roast_tier=roast_tier, uses_premium_voice=use_premium_voice,
                               uses_premium_persona=uses_premium_persona, hd_export=hd_export)
     free = (roast_tier == "standard" and not use_premium_voice and not uses_premium_persona and not hd_export
             and current_user.last_free_roast_date != eng.today_utc())
-    if current_user.is_preview and PREVIEW_UNLIMITED_CREDITS:
+    if current_user.is_preview and _cfg.PREVIEW_UNLIMITED_CREDITS:
         # Preview accounts cannot purchase credits, so generation is not credit
         # limited. It is billed at zero rather than as the daily free roast, so
         # the once-per-day allowance is not consumed and nothing is capped.
@@ -89,11 +90,10 @@ async def generate_roast(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    import config as _cfg
     img_bytes, img_types = await eng.read_images(images)
     byok_openai, byok_eleven = eng.user_byok(current_user)
     byok_openrouter = eng.user_byok_openrouter(current_user)
-    has_personal_writer = bool(byok_openrouter) if ROAST_WRITER_PROVIDER == "openrouter" else bool(byok_openai)
+    has_personal_writer = bool(byok_openrouter) if _cfg.ROAST_WRITER_PROVIDER == "openrouter" else bool(byok_openai)
     if current_user.is_preview and not has_personal_writer:
         await consume_preview_hosted("show")
     prompt = build_roast_prompt(personas, subject_name, user_context, duration_minutes, roast_tier == "premium",

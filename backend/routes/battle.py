@@ -79,8 +79,9 @@ async def generate_battle(
     heat = normalize_heat(heat) if heat is not None else highest_unlocked_heat(
         current_user.nsfw_edgier_unlocked or current_user.lifetime_founder)
     eng.check_heat_access(current_user, heat)
+    import config as _cfg
     cost = battle_cost(uses_premium)
-    if current_user.is_preview and PREVIEW_UNLIMITED_CREDITS:
+    if current_user.is_preview and _cfg.PREVIEW_UNLIMITED_CREDITS:
         cost = 0
     if cost and current_user.credits < cost:
         raise HTTPException(status_code=402, detail=f"Not enough credits — this battle costs {cost}. You have {current_user.credits}.")
@@ -91,11 +92,10 @@ async def generate_battle(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    import config as _cfg
     img_bytes, img_types = await eng.read_images(images)
     byok_openai, byok_eleven = eng.user_byok(current_user)
     byok_openrouter = eng.user_byok_openrouter(current_user)
-    has_personal_writer = bool(byok_openrouter) if ROAST_WRITER_PROVIDER == "openrouter" else bool(byok_openai)
+    has_personal_writer = bool(byok_openrouter) if _cfg.ROAST_WRITER_PROVIDER == "openrouter" else bool(byok_openai)
     if current_user.is_preview and not has_personal_writer:
         await consume_preview_hosted("show")
     a, b = fighters

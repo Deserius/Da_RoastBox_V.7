@@ -119,7 +119,8 @@ async def synthesize_line(text: str, persona_id: str, persona_meta: Optional[dic
     prof_pitch = float((profile or {}).get("pitch_adjustment") or 1.0)
     prof_voice = (profile or {}).get("voice_id") or "af_heart"
 
-    eleven_key = user_elevenlabs_key or (ELEVENLABS_API_KEY if premium_voices_unlocked else None)
+    import config as _cfg
+    eleven_key = user_elevenlabs_key or ((ELEVENLABS_API_KEY or _cfg.ELEVENLABS_API_KEY) if premium_voices_unlocked else None)
     if eleven_key and (prof_provider == "elevenlabs" or premium_voices_unlocked or user_elevenlabs_key):
         try:
             tag = ELEVEN_TAGS.get((beat or {}).get("emotion") or "", "")

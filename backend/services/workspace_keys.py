@@ -148,7 +148,16 @@ def save_workspace_keys(updates: Dict[str, Optional[str]]) -> Dict[str, str]:
             env_updates[env_name] = cleaned
             if hasattr(config, env_name):
                 setattr(config, env_name, cleaned)
-            for mod_name in ("routes.payments", "routes.auth", "services.voice_orchestrator", "services.roast_writer"):
+            for mod_name in (
+                "routes.payments",
+                "routes.auth",
+                "routes.roast",
+                "routes.battle",
+                "routes.personas",
+                "services.voice_orchestrator",
+                "services.roast_writer",
+                "services.openai_service",
+            ):
                 mod = sys.modules.get(mod_name)
                 if mod is not None and hasattr(mod, env_name):
                     setattr(mod, env_name, cleaned)

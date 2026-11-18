@@ -143,13 +143,13 @@ def test_kokoro_piper_edge_elevenlabs_synthesis_and_cache(tmp_path, monkeypatch)
                 assert res_p.provider == "piper"
 
             # 3. ElevenLabs preservation when explicitly selected with API key
-    with patch("services.tts.elevenlabs_provider.synthesize", new=AsyncMock(return_value=b"ID3fake-mp3-data" * 50)) as mock_el:
-        el_dummy = "el-offline-not-a-real-key-012345"
-        res_el = await manager.synthesize_speech(
-            text="Premium ElevenLabs voice preserved.", persona_id="persona_p1",
-            provider_preference="elevenlabs", user_elevenlabs_key=el_dummy,
-            allow_premium_elevenlabs=True,
-        )
+            with patch("services.tts.elevenlabs_provider.synthesize", new=AsyncMock(return_value=b"ID3fake-mp3-data" * 50)) as mock_el:
+                el_dummy = "el-offline-not-a-real-key-012345"
+                res_el = await manager.synthesize_speech(
+                    text="Premium ElevenLabs voice preserved.", persona_id="persona_p1",
+                    provider_preference="elevenlabs", user_elevenlabs_key=el_dummy,
+                    allow_premium_elevenlabs=True,
+                )
                 assert res_el.provider == "elevenlabs"
                 assert mock_el.call_count == 1
 

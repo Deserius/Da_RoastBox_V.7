@@ -126,14 +126,20 @@ async def voice_preview(persona_id: str, sample: int = Query(0, ge=0), current_u
                     if not (byok_openai or byok_eleven or hosted_available or preview_hosted):
                         raise HTTPException(status_code=503, detail="Voice preview requires an OpenAI or ElevenLabs key in Settings, or configured hosted AI credentials.")
                     try:
-                        await synthesize_line(line, persona_id, p, byok_eleven, byok_openai,
-                                              premium_voices_unlocked=premium, beat=beat, filename=filename,
-                                              allow_hosted_openai=not preview or preview_hosted)
+                        _, preview_provider = await synthesize_line(
+                            line, persona_id, p, byok_eleven, byok_openai,
+                            premium_voices_unlocked=premium, beat=beat, filename=filename,
+                            allow_hosted_openai=not preview or preview_hosted)
                     except Exception as e:
                         raise HTTPException(status_code=503, detail="Voice preview unavailable. Check your voice provider configuration.") from e
                     await collection.update_one(
                         key,
-                        {"$set": {**key, "version": PREVIEW_VERSION, "filename": filename, "text": line}},
+                        {"$set": {
+                            **key,
+                            "version": "sandbox-v1" if preview_provider == "sandbox_preview" else PREVIEW_VERSION,
+                            "filename": filename,
+                            "text": line,
+                        }},
                         upsert=True)
             finally:
                 await voice_preview_leases_collection.delete_one({"_id": lease_key, "owner": owner})

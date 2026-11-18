@@ -11,9 +11,10 @@ from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
 from config import (AUDIO_DIR, ELEVENLABS_API_KEY, ROAST_TTS_CACHE, ROAST_TTS_CONCURRENCY,
-                    ROAST_TTS_TIMEOUT_S)
+                    ROAST_TTS_TIMEOUT_S, PREVIEW_SANDBOX_FALLBACK)
 from .openai_service import synthesize_tts_openai
 from .elevenlabs_service import synthesize_tts_elevenlabs
+from .sandbox_preview import is_network_connection_error, synthesize_sandbox_audio
 from .storage import save_audio
 
 log = logging.getLogger(__name__)
@@ -118,12 +119,20 @@ async def synthesize_line(text: str, persona_id: str, persona_meta: Optional[dic
     if audio is None:
         if not allow_hosted_openai and not user_openai_key:
             raise RuntimeError("Preview voice requires a personal OpenAI key when ElevenLabs is unavailable")
-        audio = await synthesize_tts_openai(
-            text=text, voice=meta.get("tts_voice_hd") or meta.get("tts_voice") or "ash",
-            speed=float((meta.get("speech") or {}).get("rate") or 1.0),
-            byok_key=user_openai_key, instructions=acting_instructions(meta, beat),
-        )
-        provider = "openai"
+        try:
+            audio = await synthesize_tts_openai(
+                text=text, voice=meta.get("tts_voice_hd") or meta.get("tts_voice") or "ash",
+                speed=float((meta.get("speech") or {}).get("rate") or 1.0),
+                byok_key=user_openai_key, instructions=acting_instructions(meta, beat),
+            )
+            provider = "openai"
+        except Exception as e:
+            if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(e):
+                log.warning("TTS provider unreachable (%s); generating offline sandbox preview audio.", type(e).__name__)
+                audio = await asyncio.to_thread(synthesize_sandbox_audio, text, persona_id, meta)
+                provider = "sandbox_preview"
+            else:
+                raise
     key = _cache_key(text, str(meta.get("tts_voice_hd") or meta.get("tts_voice") or "ash"),
                      acting_instructions(meta, beat), provider)
     cached = _cache_get(key)

@@ -139,6 +139,9 @@ PREVIEW_HOSTED_DAILY_VOICE_LIMIT = int(os.environ.get("PREVIEW_HOSTED_DAILY_VOIC
 # Preview accounts cannot buy credits, so this removes the credit requirement
 # (and the debit) for them. Off by default for any deployment that bills users.
 PREVIEW_UNLIMITED_CREDITS = _flag("PREVIEW_UNLIMITED_CREDITS")
+# Off by default: only enable inside a network-sandboxed workspace preview so
+# roasts, battles, and voice samples still run when outbound AI APIs are blocked.
+PREVIEW_SANDBOX_FALLBACK = _flag("PREVIEW_SANDBOX_FALLBACK")
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "emergent").strip().lower()
 if STORAGE_BACKEND not in ("emergent", "local", "vercel_blob"):
     raise ValueError("STORAGE_BACKEND must be emergent, local or vercel_blob")

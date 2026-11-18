@@ -126,7 +126,16 @@ async def generate_battle(
         written = await write_script(prompt, fighters, img_bytes, img_types, byok_openai,
                                     expected_beats=battle_beats(rounds),
                                     adult=adult_language, off_limits=off_limits,
-                                    persona_portraits=portraits, on_beat=_on_beat)
+                                    persona_portraits=portraits, on_beat=_on_beat,
+                                    sandbox_context={
+                                        "subject_name": subject_name,
+                                        "user_context": user_context,
+                                        "comedy_styles": styles,
+                                        "heat": heat,
+                                        "is_battle": True,
+                                        "is_rap": battle_style == "rap",
+                                    })
+        used_sandbox_script = any(bool(b.pop("_sandbox_preview", False)) for b in written)
         beats = written[:battle_beats(rounds) + 2]
         for beat in beats:
             beat.pop("_standalone", None)
@@ -148,6 +157,10 @@ async def generate_battle(
         raise HTTPException(status_code=503, detail="Voice generation failed. Check your OpenAI or ElevenLabs configuration; no credits were charged.")
     result = score_battle(transcript, a["id"], b["id"], random.Random())
 
+    sandbox_preview = used_sandbox_script or ("sandbox_preview" in providers)
+    if sandbox_preview:
+        cost = 0
+
     record = RoastRecord(
         user_id=current_user.id, mode="battle", battle_style=battle_style, heat=heat, adult_language=adult_language, persona_ids=[a["id"], b["id"]], subject_name=subject_name,
         user_context=user_context, off_limits=off_limits, comedy_styles=styles, image_count=len(img_bytes), duration_minutes=rounds,
@@ -155,6 +168,8 @@ async def generate_battle(
         audio_provider=",".join(providers) or None, battle=result,
     )
     remaining = await eng.commit_record(current_user, record, img_bytes,
-                                        f"Roast Battle: {a['displayName']} vs {b['displayName']}")
+                                        f"Sandbox preview battle: {a['displayName']} vs {b['displayName']}" if sandbox_preview else f"Roast Battle: {a['displayName']} vs {b['displayName']}")
     return {"roast_id": record.id, "battle_style": battle_style, "transcript": transcript, "images": eng.subject_image_urls(record.id, len(img_bytes)), "battle": result, "credits_spent": cost,
-            "credits_remaining": remaining, "audio_provider": record.audio_provider}
+            "credits_remaining": remaining, "audio_provider": record.audio_provider,
+            "sandbox_preview": sandbox_preview,
+            "sandbox_notice": ("Workspace Preview Mode: outbound AI/voice hosts are blocked by Arena's sandbox, so this battle ran locally with offline preview voices (0 credits charged)." if sandbox_preview else None)}

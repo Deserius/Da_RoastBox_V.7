@@ -138,13 +138,21 @@ export default function StudioPage() {
       setTheater(true);
       setReloadHistory((n) => n + 1);
       refresh();
-      toast(data.was_free_roast ? "Daily free roast used ✨" : `-${data.credits_spent} credits · ${data.credits_remaining} left`, "success");
+      if (data.sandbox_preview) {
+        toast(data.sandbox_notice || "Preview Mode: running offline preview voices (0 credits charged).", "success");
+      } else {
+        toast(data.was_free_roast ? "Daily free roast used ✨" : `-${data.credits_spent} credits · ${data.credits_remaining} left`, "success");
+      }
     } catch (e) {
       if (!e?.response) {
         setReloadHistory((n) => n + 1); refresh();
         toast("Connection interrupted. Wait a moment and check Recent shows before retrying to avoid another paid show.", "error");
       } else {
-        toast("Roast failed: " + (e?.response?.data?.detail || e.message), "error");
+        const rawDetail = e?.response?.data?.detail;
+        const msg = rawDetail || (typeof e?.response?.data === "string" && e.response.data.includes("Cloudflare")
+          ? "Upstream AI gateway is unreachable from this preview environment."
+          : e.message);
+        toast("Roast failed: " + msg, "error");
       }
     } finally { setBusy(false); }
   };

@@ -116,7 +116,14 @@ async def generate_roast(
         written = await write_script(prompt, personas, img_bytes, img_types, byok_openai,
                                      expected_beats=_target_beats(duration_minutes),
                                      adult=adult_language, off_limits=off_limits,
-                                     roast_tier=roast_tier, on_beat=_on_beat)
+                                     roast_tier=roast_tier, on_beat=_on_beat,
+                                     sandbox_context={
+                                         "subject_name": subject_name,
+                                         "user_context": user_context,
+                                         "comedy_styles": styles,
+                                         "heat": heat,
+                                     })
+        used_sandbox_script = any(bool(b.pop("_sandbox_preview", False)) for b in written)
         beats = finish_roast_script(written, personas, subject_name, _target_beats(duration_minutes) + 1,
                                     adult=adult_language, off_limits=off_limits)
         if not beats:
@@ -137,6 +144,10 @@ async def generate_roast(
         # A paid result must not silently ship as a partial/silent show.
         raise HTTPException(status_code=503, detail="Voice generation failed. Check your OpenAI or ElevenLabs configuration; no credits were charged.")
 
+    sandbox_preview = used_sandbox_script or ("sandbox_preview" in providers)
+    if sandbox_preview:
+        cost, free = 0, False
+
     desc = (f"{roast_tier.capitalize()} Roast ({duration_minutes}min)" + (" +PremiumVoice" if use_premium_voice else "")
             + (" +PremiumPersona" if uses_premium_persona else "") + (" +HDExport" if hd_export else ""))
     record = RoastRecord(
@@ -147,11 +158,13 @@ async def generate_roast(
         credits_spent=cost, was_free_roast=free, transcript=transcript, audio_provider=",".join(providers) or None,
     )
     remaining = await eng.commit_record(current_user, record, img_bytes,
-                                        f"Daily free roast ({duration_minutes}min)" if free else desc)
+                                        "Sandbox preview roast" if sandbox_preview else (f"Daily free roast ({duration_minutes}min)" if free else desc))
     return {"roast_id": record.id, "persona_ids": ids, "transcript": transcript, "heat": heat, "adult_language": adult_language,
             "images": eng.subject_image_urls(record.id, len(img_bytes)), "audio_provider": record.audio_provider,
             "duration_minutes": duration_minutes, "roast_tier": roast_tier, "credits_spent": cost,
-            "was_free_roast": free, "credits_remaining": remaining, "plan_tier": current_user.plan_tier}
+            "was_free_roast": free, "credits_remaining": remaining, "plan_tier": current_user.plan_tier,
+            "sandbox_preview": sandbox_preview,
+            "sandbox_notice": ("Workspace Preview Mode: outbound AI/voice hosts are blocked by Arena's sandbox, so this roast ran locally with offline preview voices (0 credits charged)." if sandbox_preview else None)}
 
 
 @router.get("/history")

@@ -110,13 +110,20 @@ export default function BattlePage() {
       const { data } = await api.post("/battle/generate", fd, { timeout: 180000 });
       setShow(data);
       refresh();
+      if (data.sandbox_preview) {
+        toast(data.sandbox_notice || "Preview Mode: running offline preview voices (0 credits charged).", "success");
+      }
       openTheater();
     } catch (e) {
       if (!e?.response) {
         refresh();
         toast("Connection interrupted. Wait a moment and check Recent shows in Studio before retrying to avoid another paid battle.", "error");
       } else {
-        toast("Battle failed: " + (e?.response?.data?.detail || e.message), "error");
+        const rawDetail = e?.response?.data?.detail;
+        const msg = rawDetail || (typeof e?.response?.data === "string" && e.response.data.includes("Cloudflare")
+          ? "Upstream AI gateway is unreachable from this preview environment."
+          : e.message);
+        toast("Battle failed: " + msg, "error");
       }
     } finally { setBusy(false); }
   };

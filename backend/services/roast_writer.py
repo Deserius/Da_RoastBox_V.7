@@ -16,6 +16,8 @@ import re
 from typing import Dict, List, Optional
 
 from .openai_service import get_client, get_emergent_client
+from .sandbox_preview import (SandboxNetworkUnavailable, build_sandbox_preview_beats,
+                              is_network_connection_error)
 from config import (EMERGENT_LLM_KEY, OPENAI_API_KEY, AI_DEFAULT_PROVIDER, ROAST_WRITER_PROVIDER,
                     OPENROUTER_API_KEY, ROAST_WRITER_MODEL, ROAST_FREE_WRITER_ONLY,
                     ROAST_FREE_BACKUP_MODEL, ROAST_POLLINATIONS_FALLBACK, ROAST_ALLOW_PAID_WRITER_FALLBACK,
@@ -25,7 +27,8 @@ from config import (EMERGENT_LLM_KEY, OPENAI_API_KEY, AI_DEFAULT_PROVIDER, ROAST
                     ROAST_PAID_STANDARD_MODEL, ROAST_FREE_PREMIUM_MODEL, ROAST_WRITER_TIMEOUT_S,
                     ROAST_WRITER_RETRY, ROAST_VISION_TIMEOUT_S, ROAST_VISION_MAX_TOKENS,
                     ROAST_WRITER_MAX_TOKENS, ROAST_WRITER_TOKENS_PER_BEAT, ROAST_WRITER_TOKEN_BASE,
-                    ROAST_STREAM_TTS, ROAST_REASONING_EFFORT, ROAST_WRITER_TRUNCATION_RETRY, DATA_DIR)
+                    ROAST_STREAM_TTS, ROAST_REASONING_EFFORT, ROAST_WRITER_TRUNCATION_RETRY,
+                    PREVIEW_SANDBOX_FALLBACK, DATA_DIR)
 from openai import OpenAI, APITimeoutError, RateLimitError
 
 log = logging.getLogger(__name__)
@@ -493,6 +496,8 @@ async def _analyze_images(client, images: List[bytes], image_types: List[str], o
         return _normalize_photo_observations(raw, len(images), off_limits)
     except Exception as exc:
         log.warning("Photo analysis failed (%s)", type(exc).__name__)
+        if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(exc):
+            raise SandboxNetworkUnavailable("Photo analysis blocked in sandbox preview") from exc
         raise RuntimeError("Photo analysis unavailable; no show credits were charged") from None
 
 
@@ -636,11 +641,32 @@ def _creative_client():
     return OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1", timeout=40.0, max_retries=0)
 
 
+def _sandbox_fallback_beats(user_block: str, personas: List[Dict], images: List[bytes], *,
+                            expected_beats: Optional[int], adult: bool, off_limits: Optional[str],
+                            persona_portraits: List[Dict], sandbox_context: Optional[dict]) -> List[Dict]:
+    meta = dict(sandbox_context or {})
+    is_battle = bool(meta.get("is_battle")) or "ROAST BATTLE" in (user_block or "").upper() or len(persona_portraits) == 2
+    is_rap = bool(meta.get("is_rap")) or "RAP BATTLE" in (user_block or "").upper()
+    return build_sandbox_preview_beats(
+        personas,
+        subject_name=meta.get("subject_name"),
+        user_context=meta.get("user_context"),
+        expected_beats=expected_beats,
+        n_images=max(1, len(images)),
+        adult=adult,
+        off_limits=off_limits,
+        is_battle=is_battle,
+        is_rap=is_rap,
+        comedy_styles=meta.get("comedy_styles"),
+        heat=meta.get("heat") or "medium",
+    )
+
+
 async def write_script(user_block: str, personas: List[Dict], images: List[bytes], image_types: List[str],
                        byok_key: Optional[str] = None, *, expected_beats: Optional[int] = None,
                        adult: bool = True, off_limits: Optional[str] = None,
                        persona_portraits: Optional[List[Dict]] = None, roast_tier: str = "standard",
-                       on_beat=None) -> List[Dict]:
+                       on_beat=None, sandbox_context: Optional[dict] = None) -> List[Dict]:
     """on_beat, when provided, receives each normalized beat as it streams so the
     caller can begin voice work before the whole script has finished."""
     persona_portraits = persona_portraits or []
@@ -678,7 +704,13 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
             raise RuntimeError("No writer is configured")
         visual_bytes = list(images) + [p["data"] for p in persona_portraits]
         visual_types = list(image_types) + [p["type"] for p in persona_portraits]
-        observations = await _analyze_images(get_client(byok_key), visual_bytes, visual_types, off_limits) if visual_bytes else []
+        try:
+            observations = await _analyze_images(get_client(byok_key), visual_bytes, visual_types, off_limits) if visual_bytes else []
+        except SandboxNetworkUnavailable:
+            log.warning("AI vision endpoint unreachable; using offline sandbox preview script.")
+            return _sandbox_fallback_beats(
+                user_block, personas, images, expected_beats=expected_beats, adult=adult,
+                off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context)
         guest_evidence = [o for o in observations if o["image_index"] < len(images)]
         portrait_evidence = [{"persona_id": persona_portraits[o["image_index"] - len(images)]["id"], "details": o["details"]}
                              for o in observations if len(images) <= o["image_index"] < len(visual_bytes)]
@@ -698,6 +730,7 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
         if allow_emergent:
             writers.append(("emergent", MODEL_CHAIN[0]))
         rate_retried = False
+        network_failures = 0
         for label, model in writers:
             started = time.monotonic()
             try:
@@ -779,6 +812,14 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
                 return _attach_lineup_roasts(beats, candidate, personas, adult=adult, off_limits=off_limits)
             except Exception as e:
                 log.warning("Script writer %s model=%s failed (%s) latency_ms=%d tokens=unknown cost_usd=unknown", label, model, type(e).__name__, round((time.monotonic() - started) * 1000))
+                if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(e):
+                    network_failures += 1
+                    break
+        if PREVIEW_SANDBOX_FALLBACK and network_failures:
+            log.warning("AI writer endpoints unreachable; using offline sandbox preview script.")
+            return _sandbox_fallback_beats(
+                user_block, personas, images, expected_beats=expected_beats, adult=adult,
+                off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context)
         raise RuntimeError("Script did not pass local checks or configured writers failed")
 
     client = get_client(byok_key)
@@ -791,6 +832,7 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
     direct_openai = bool(byok_key or (OPENAI_API_KEY and (AI_DEFAULT_PROVIDER == "openai" or not EMERGENT_LLM_KEY)))
     models = [m for m in MODEL_CHAIN if not m.startswith("claude")] if direct_openai else MODEL_CHAIN
     text = ""
+    network_failed = False
     for model in models:
         try:
             resp = await asyncio.to_thread(client.chat.completions.create, model=model, messages=messages,
@@ -803,6 +845,14 @@ async def write_script(user_block: str, personas: List[Dict], images: List[bytes
             break
         except Exception as e:
             log.warning("Model %s failed (%s)", model, type(e).__name__)
+            if PREVIEW_SANDBOX_FALLBACK and is_network_connection_error(e):
+                network_failed = True
+                break
+    if not text and network_failed and PREVIEW_SANDBOX_FALLBACK:
+        log.warning("Direct AI endpoints unreachable; using offline sandbox preview script.")
+        return _sandbox_fallback_beats(
+            user_block, personas, images, expected_beats=expected_beats, adult=adult,
+            off_limits=off_limits, persona_portraits=persona_portraits, sandbox_context=sandbox_context)
     if not text:
         raise RuntimeError("All roast models refused or failed. Try different context / subject.")
     # Do not silently make another paid critique/rewrite call. Existing provider

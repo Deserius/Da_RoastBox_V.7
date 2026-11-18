@@ -140,7 +140,7 @@ def friendly_ai_error(e: Exception) -> HTTPException:
         return HTTPException(status_code=502, detail="Upstream filter blocked this roast. Try a different photo or context.")
     if "refused" in low or "policy" in low:
         return HTTPException(status_code=502, detail="AI refused this combination. Try a different subject or rephrase.")
-    return HTTPException(status_code=502, detail="Roast generation failed at the AI provider. Please try again or check your configured key.")
+    return HTTPException(status_code=503, detail="Roast generation failed at the AI provider. Please try again or check your configured key.")
 
 
 # Pending/aborted records are never shown or shared until their debit marker

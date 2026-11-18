@@ -194,8 +194,9 @@ async def account_activity(response: Response, current_user: User = Depends(get_
 
 
 def _test_payments_ready() -> bool:
+    import config as _cfg
     return bool(
-        ALLOW_PREVIEW_TEST_PAYMENTS
+        _cfg.ALLOW_PREVIEW_TEST_PAYMENTS
         and STRIPE_TEST_ONLY
         and STRIPE_API_KEY.startswith(("sk_test_", "rk_test_"))
     )
@@ -203,6 +204,7 @@ def _test_payments_ready() -> bool:
 
 @router.post("/checkout")
 async def create_checkout(body: CheckoutRequest, request: Request, current_user: User = Depends(get_current_user)):
+    import config as _cfg
     preview_test_mode = _test_payments_ready()
     if current_user.is_preview and not preview_test_mode:
         raise HTTPException(status_code=403, detail="Preview accounts cannot make purchases. Sign in with a verified account for checkout.")

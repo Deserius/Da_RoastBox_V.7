@@ -36,6 +36,7 @@ export default function TopBar() {
           🔥 {user?.credits ?? 0} Credits{user?.is_preview ? " · Preview" : ""}
         </span>
         <button className="btn-ghost" onClick={() => navigate("/roasters")} data-testid="nav-roasters-btn">Roasters</button>
+        <button className="btn-ghost" onClick={() => navigate("/voice-studio")} data-testid="nav-voice-studio-btn">🎙️ Voice Studio</button>
         <button className="btn-ghost" onClick={() => navigate("/battle")} data-testid="nav-battle-btn">🥊 Battle</button>
         <button className="btn-ghost" onClick={() => navigate("/credits")} data-testid="nav-credits-btn">Buy Credits</button>
         <button className="btn-ghost" onClick={() => navigate("/settings")} data-testid="nav-settings-btn">Settings</button>

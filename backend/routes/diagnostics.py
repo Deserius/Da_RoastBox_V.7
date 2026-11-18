@@ -112,6 +112,8 @@ async def health():
 @router.get("/diagnostics")
 async def diagnostics(deep: bool = False, user: Optional[User] = Depends(get_optional_user)):
     """Config summary; `?deep=true` (signed-in only) performs live provider calls."""
+    import config as cfg
+    from services.workspace_keys import get_saved_key_masks
     if deep and not user:
         raise HTTPException(status_code=401, detail="Sign in to run deep diagnostics")
     if deep and user and user.is_preview:
@@ -119,32 +121,33 @@ async def diagnostics(deep: bool = False, user: Optional[User] = Depends(get_opt
     report = {
         "version": APP_VERSION,
         "config": {
-            "emergent_llm_key": bool(EMERGENT_LLM_KEY),
-            "openai_hosted_key": bool(OPENAI_API_KEY),
-            "openrouter_hosted_key": bool(OPENROUTER_API_KEY),
-            "stripe_api_key": bool(STRIPE_API_KEY),
-            "stripe_test_only": STRIPE_TEST_ONLY,
-            "elevenlabs_hosted_key": bool(ELEVENLABS_API_KEY),
-            "google_oauth_configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
-            "roast_writer_provider": ROAST_WRITER_PROVIDER,
-            "roast_writer_profile": ROAST_WRITER_PROFILE,
-            "roast_writer_model": ROAST_WRITER_MODEL,
-            "dev_login_enabled": ALLOW_DEV_LOGIN,
-            "source_download_enabled": ALLOW_SOURCE_DOWNLOAD,
-            "preview_login_enabled": ENABLE_PREVIEW_LOGIN,
-            "preview_hosted_ai_enabled": ENABLE_PREVIEW_LOGIN and ALLOW_PREVIEW_HOSTED_AI and bool(EMERGENT_LLM_KEY or OPENAI_API_KEY),
-            "preview_hosted_daily_show_limit": "unlimited" if PREVIEW_HOSTED_DAILY_SHOW_LIMIT < 0 else PREVIEW_HOSTED_DAILY_SHOW_LIMIT,
-            "preview_hosted_daily_voice_limit": "unlimited" if PREVIEW_HOSTED_DAILY_VOICE_LIMIT < 0 else PREVIEW_HOSTED_DAILY_VOICE_LIMIT,
-            "preview_unlimited_credits": PREVIEW_UNLIMITED_CREDITS,
-            "preview_sandbox_fallback": PREVIEW_SANDBOX_FALLBACK,
+            "emergent_llm_key": bool(cfg.EMERGENT_LLM_KEY),
+            "openai_hosted_key": bool(cfg.OPENAI_API_KEY),
+            "openrouter_hosted_key": bool(cfg.OPENROUTER_API_KEY),
+            "stripe_api_key": bool(cfg.STRIPE_API_KEY),
+            "stripe_test_only": cfg.STRIPE_TEST_ONLY,
+            "elevenlabs_hosted_key": bool(cfg.ELEVENLABS_API_KEY),
+            "google_oauth_configured": bool(cfg.GOOGLE_CLIENT_ID and cfg.GOOGLE_CLIENT_SECRET),
+            "roast_writer_provider": cfg.ROAST_WRITER_PROVIDER,
+            "roast_writer_profile": cfg.ROAST_WRITER_PROFILE,
+            "roast_writer_model": cfg.ROAST_WRITER_MODEL,
+            "dev_login_enabled": cfg.ALLOW_DEV_LOGIN,
+            "source_download_enabled": cfg.ALLOW_SOURCE_DOWNLOAD,
+            "preview_login_enabled": cfg.ENABLE_PREVIEW_LOGIN,
+            "preview_hosted_ai_enabled": cfg.ENABLE_PREVIEW_LOGIN and cfg.ALLOW_PREVIEW_HOSTED_AI and bool(cfg.EMERGENT_LLM_KEY or cfg.OPENAI_API_KEY or cfg.OPENROUTER_API_KEY),
+            "preview_hosted_daily_show_limit": "unlimited" if cfg.PREVIEW_HOSTED_DAILY_SHOW_LIMIT < 0 else cfg.PREVIEW_HOSTED_DAILY_SHOW_LIMIT,
+            "preview_hosted_daily_voice_limit": "unlimited" if cfg.PREVIEW_HOSTED_DAILY_VOICE_LIMIT < 0 else cfg.PREVIEW_HOSTED_DAILY_VOICE_LIMIT,
+            "preview_unlimited_credits": cfg.PREVIEW_UNLIMITED_CREDITS,
+            "preview_sandbox_fallback": cfg.PREVIEW_SANDBOX_FALLBACK,
             "test_payments_enabled": bool(
-                ALLOW_PREVIEW_TEST_PAYMENTS
-                and STRIPE_TEST_ONLY
-                and STRIPE_API_KEY.startswith(("sk_test_", "rk_test_"))
+                cfg.ALLOW_PREVIEW_TEST_PAYMENTS
+                and cfg.STRIPE_TEST_ONLY
+                and cfg.STRIPE_API_KEY.startswith(("sk_test_", "rk_test_"))
             ),
-            "storage_backend": STORAGE_BACKEND,
-            "stripe_webhook_secret": bool(STRIPE_WEBHOOK_SECRET),
-            "audio_cache_writable": AUDIO_DIR.exists(),
+            "saved_key_masks": get_saved_key_masks() if cfg.PREVIEW_SANDBOX_FALLBACK else {},
+            "storage_backend": cfg.STORAGE_BACKEND,
+            "stripe_webhook_secret": bool(cfg.STRIPE_WEBHOOK_SECRET),
+            "audio_cache_writable": cfg.AUDIO_DIR.exists(),
         },
         "personas": _persona_integrity(),
         "checks": {"mongo": await _timed(_check_mongo())},

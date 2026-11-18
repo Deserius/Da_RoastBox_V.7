@@ -116,9 +116,12 @@ async def voice_preview(persona_id: str, sample: int = Query(0, ge=0), current_u
                     from services.voice_orchestrator import synthesize_line
                     from services import roast_engine as eng
                     beat = {"type": "punchline", "emotion": "cocky", "delivery": "signature line, sell it to the back row"}
+                    import config as _cfg
                     byok_openai, byok_eleven = eng.user_byok(current_user)
                     preview = bool(current_user.is_preview)
-                    premium = bool(eng.has_premium_voices(current_user) and not preview)
+                    premium = bool(eng.has_premium_voices(current_user) and (
+                        not preview or bool(byok_eleven) or bool(_cfg.PREVIEW_SANDBOX_FALLBACK)
+                    ))
                     hosted_available = not preview and (EMERGENT_LLM_KEY or OPENAI_API_KEY or (premium and ELEVENLABS_API_KEY))
                     preview_hosted = False
                     if preview and not (byok_openai or byok_eleven):

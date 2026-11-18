@@ -75,6 +75,7 @@ export default function AccountMenu({ user, logout, onDownload, downloading = fa
   const nav = [
     { title: "Roast Studio", path: "/studio", Icon: Home, id: "studio" },
     { title: "Roasters", path: "/roasters", Icon: Mic2, id: "roasters" },
+    { title: "Voice Studio", path: "/voice-studio", Icon: Mic2, id: "voice-studio" },
     { title: "Battle", path: "/battle", Icon: Swords, id: "battle" },
     { title: "Buy Credits", path: "/credits", Icon: ShoppingBag, id: "credits" },
     { title: "Settings", path: "/settings", Icon: Settings, id: "settings" },

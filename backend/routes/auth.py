@@ -177,6 +177,13 @@ async def create_session(body: SessionRequest, response: Response):
 
 @router.get("/me")
 async def me(current_user: User = Depends(get_current_user)):
+    saved_ws = {}
+    if config.PREVIEW_SANDBOX_FALLBACK:
+        from services.workspace_keys import get_saved_key_masks, get_saved_workspace_keys
+        saved_ws = get_saved_workspace_keys()
+        ws_masks = get_saved_key_masks()
+    else:
+        ws_masks = {}
     return {
         "id": current_user.id,
         "email": current_user.email,
@@ -184,9 +191,10 @@ async def me(current_user: User = Depends(get_current_user)):
         "picture": current_user.picture,
         "credits": current_user.credits,
         "is_preview": current_user.is_preview,
-        "has_byok_openai": current_user.has_byok_openai,
-        "has_byok_elevenlabs": current_user.has_byok_elevenlabs,
-        "has_byok_openrouter": current_user.has_byok_openrouter,
+        "has_byok_openai": current_user.has_byok_openai or bool(current_user.is_preview and saved_ws.get("openai_key")),
+        "has_byok_elevenlabs": current_user.has_byok_elevenlabs or bool(current_user.is_preview and saved_ws.get("elevenlabs_key")),
+        "has_byok_openrouter": current_user.has_byok_openrouter or bool(current_user.is_preview and saved_ws.get("openrouter_key")),
+        "saved_key_masks": ws_masks,
         "premium_personas_unlocked": current_user.premium_personas_unlocked,
         "premium_voices_unlocked": current_user.premium_voices_unlocked,
         "roast_battle_unlocked": current_user.roast_battle_unlocked,
@@ -262,6 +270,21 @@ async def preview_login(response: Response):
     if not ENABLE_PREVIEW_LOGIN:
         raise HTTPException(status_code=404, detail="Not found")
 
+    ws_byok_kwargs = {}
+    if config.PREVIEW_SANDBOX_FALLBACK:
+        from crypto_utils import encrypt
+        from services.workspace_keys import get_saved_workspace_keys
+        saved_ws = get_saved_workspace_keys()
+        if saved_ws.get("openai_key"):
+            ws_byok_kwargs["openai_key_encrypted"] = encrypt(saved_ws["openai_key"])
+            ws_byok_kwargs["has_byok_openai"] = True
+        if saved_ws.get("elevenlabs_key"):
+            ws_byok_kwargs["elevenlabs_key_encrypted"] = encrypt(saved_ws["elevenlabs_key"])
+            ws_byok_kwargs["has_byok_elevenlabs"] = True
+        if saved_ws.get("openrouter_key"):
+            ws_byok_kwargs["openrouter_key_encrypted"] = encrypt(saved_ws["openrouter_key"])
+            ws_byok_kwargs["has_byok_openrouter"] = True
+
     user = User(
         email=f"preview-{secrets.token_hex(16)}@example.invalid",
         name="Preview Guest",
@@ -271,6 +294,7 @@ async def preview_login(response: Response):
         premium_voices_unlocked=True,
         roast_battle_unlocked=True,
         nsfw_edgier_unlocked=True,
+        **ws_byok_kwargs,
     )
     await users_collection.insert_one(user.model_dump())
     token = secrets.token_urlsafe(32)

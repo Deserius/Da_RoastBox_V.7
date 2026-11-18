@@ -91,10 +91,12 @@ async def generate_battle(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    import config as _cfg
     img_bytes, img_types = await eng.read_images(images)
     byok_openai, byok_eleven = eng.user_byok(current_user)
     byok_openrouter = eng.user_byok_openrouter(current_user)
-    if current_user.is_preview and (not byok_openai or ROAST_WRITER_PROVIDER == "openrouter"):
+    has_personal_writer = bool(byok_openrouter) if ROAST_WRITER_PROVIDER == "openrouter" else bool(byok_openai)
+    if current_user.is_preview and not has_personal_writer:
         await consume_preview_hosted("show")
     a, b = fighters
     portraits = []
@@ -110,7 +112,9 @@ async def generate_battle(
                                  current_user.nsfw_edgier_unlocked or current_user.lifetime_founder,
                                  heat=heat, adult=adult_language, n_images=len(img_bytes), off_limits=off_limits, styles=styles, rap=battle_style == "rap")
     meta_by_id = {p["id"]: p for p in fighters}
-    premium_voices = eng.has_premium_voices(current_user) and not current_user.is_preview
+    premium_voices = eng.has_premium_voices(current_user) and (
+        not current_user.is_preview or bool(byok_eleven) or bool(_cfg.PREVIEW_SANDBOX_FALLBACK)
+    )
     started: Dict[str, asyncio.Task] = {}
 
     def _start(beat):

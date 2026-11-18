@@ -22,6 +22,7 @@ import EmailTokenPage from "@/pages/EmailTokenPage";
 import RoastersPage from "@/pages/RoastersPage";
 import BattlePage from "@/pages/BattlePage";
 import SharePage from "@/pages/SharePage";
+import VoiceStudioPage from "@/pages/VoiceStudioPage";
 
 function Landing({ active }) {
   return <SplashScreen active={active} />;
@@ -67,6 +68,7 @@ function App() {
                   <Route path="/credits/cancel" element={<Protected intro={intro}><Shell><CheckoutCancel /></Shell></Protected>} />
                   <Route path="/settings" element={<Protected intro={intro}><Shell><SettingsPage /></Shell></Protected>} />
                   <Route path="/roasters" element={<Protected intro={intro}><Shell><RoastersPage /></Shell></Protected>} />
+                  <Route path="/voice-studio" element={<Protected intro={intro}><Shell><VoiceStudioPage /></Shell></Protected>} />
                   <Route path="/battle" element={<Protected intro={intro}><Shell><BattlePage /></Shell></Protected>} />
                   <Route path="/r/:shareId" element={intro ? null : <ConsentGate><SharePage /></ConsentGate>} />
                   <Route path="*" element={<Navigate to="/" replace />} />

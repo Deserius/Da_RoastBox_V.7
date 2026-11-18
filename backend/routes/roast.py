@@ -89,10 +89,12 @@ async def generate_roast(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    import config as _cfg
     img_bytes, img_types = await eng.read_images(images)
     byok_openai, byok_eleven = eng.user_byok(current_user)
     byok_openrouter = eng.user_byok_openrouter(current_user)
-    if current_user.is_preview and (not byok_openai or ROAST_WRITER_PROVIDER == "openrouter"):
+    has_personal_writer = bool(byok_openrouter) if ROAST_WRITER_PROVIDER == "openrouter" else bool(byok_openai)
+    if current_user.is_preview and not has_personal_writer:
         await consume_preview_hosted("show")
     prompt = build_roast_prompt(personas, subject_name, user_context, duration_minutes, roast_tier == "premium",
                                 current_user.nsfw_edgier_unlocked or current_user.lifetime_founder,
@@ -100,7 +102,9 @@ async def generate_roast(
     _pipeline_start = time.monotonic()
     meta_by_id = {p["id"]: p for p in personas}
     requested_premium_voice = bool(use_premium_voice) or (roast_tier == "premium" and eng.has_premium_voices(current_user))
-    premium_voices = requested_premium_voice and not current_user.is_preview
+    premium_voices = requested_premium_voice and (
+        not current_user.is_preview or bool(byok_eleven) or bool(_cfg.PREVIEW_SANDBOX_FALLBACK)
+    )
     # Start voice work on each beat as it streams instead of waiting for the full script.
     started: Dict[str, asyncio.Task] = {}
 

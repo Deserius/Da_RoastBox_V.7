@@ -108,21 +108,62 @@ async def synthesize_line(text: str, persona_id: str, persona_meta: Optional[dic
     meta = persona_meta or {}
     audio: Optional[bytes] = None
     provider = "none"
+    from services.tts.voice_profiles import get_effective_profile
+    from services.tts import kokoro_provider, piper_provider
+    from services.tts.naturalness import optimize_text_for_tts, process_voice_audio
+
+    profile = await get_effective_profile(persona_id)
+    prof_provider = (profile or {}).get("voice_provider", "free_local")
+    prof_style = (profile or {}).get("speaking_style", "casual")
+    prof_rate = float((profile or {}).get("speaking_rate") or (meta.get("speech") or {}).get("rate") or 1.0)
+    prof_pitch = float((profile or {}).get("pitch_adjustment") or 1.0)
+    prof_voice = (profile or {}).get("voice_id") or "af_heart"
+
     eleven_key = user_elevenlabs_key or (ELEVENLABS_API_KEY if premium_voices_unlocked else None)
-    if eleven_key:
+    if eleven_key and (prof_provider == "elevenlabs" or premium_voices_unlocked or user_elevenlabs_key):
         try:
             tag = ELEVEN_TAGS.get((beat or {}).get("emotion") or "", "")
-            audio = await synthesize_tts_elevenlabs(eleven_key, f"{tag} {text}".strip(), meta.get("elevenlabs"))
+            el_cfg = dict(meta.get("elevenlabs") or {})
+            if (profile or {}).get("elevenlabs_voice_id"):
+                el_cfg.setdefault("voice_id", profile["elevenlabs_voice_id"])
+            audio = await synthesize_tts_elevenlabs(eleven_key, f"{tag} {text}".strip(), el_cfg or None)
             provider = "elevenlabs"
         except Exception as e:
-            log.warning("ElevenLabs synth failed (%s); falling back to OpenAI TTS.", e)
+            log.warning("ElevenLabs synth failed (%s); falling back.", e)
+
+    # Free local AI engine (Kokoro-82M / Piper) when models are installed and user didn't force OpenAI
+    if audio is None and prof_provider in ("free_local", "kokoro", "piper"):
+        shaped = optimize_text_for_tts(text, prof_style)
+        if prof_provider in ("free_local", "kokoro") and kokoro_provider.is_package_installed() and kokoro_provider.models_present():
+            try:
+                wav_bytes = await kokoro_provider.synthesize(shaped, voice_id=prof_voice, speed=prof_rate)
+                audio, _ = await asyncio.to_thread(
+                    process_voice_audio, wav_bytes, input_format="wav", output_format="mp3",
+                    pitch_factor=prof_pitch, delivery_style=prof_style,
+                    room_ambience=bool(((profile or {}).get("audio_processing") or {}).get("room_ambience")),
+                )
+                provider = "kokoro"
+            except Exception as e:
+                log.warning("Kokoro local TTS failed (%s); trying fallback.", e)
+        if audio is None and piper_provider.is_package_installed() and piper_provider.installed_voice_ids():
+            try:
+                p_vid = (profile or {}).get("piper_voice_id") or "en_US-lessac-medium"
+                wav_bytes = await piper_provider.synthesize(shaped, voice_id=p_vid, speed=prof_rate)
+                audio, _ = await asyncio.to_thread(
+                    process_voice_audio, wav_bytes, input_format="wav", output_format="mp3",
+                    pitch_factor=prof_pitch, delivery_style=prof_style,
+                )
+                provider = "piper"
+            except Exception as e:
+                log.warning("Piper local TTS failed (%s); trying next provider.", e)
+
     if audio is None:
         if not allow_hosted_openai and not user_openai_key:
             raise RuntimeError("Preview voice requires a personal OpenAI key when ElevenLabs is unavailable")
         try:
             audio = await synthesize_tts_openai(
                 text=text, voice=meta.get("tts_voice_hd") or meta.get("tts_voice") or "ash",
-                speed=float((meta.get("speech") or {}).get("rate") or 1.0),
+                speed=prof_rate,
                 byok_key=user_openai_key, instructions=acting_instructions(meta, beat),
             )
             provider = "openai"
@@ -133,7 +174,7 @@ async def synthesize_line(text: str, persona_id: str, persona_meta: Optional[dic
                 provider = "sandbox_preview"
             else:
                 raise
-    key = _cache_key(text, str(meta.get("tts_voice_hd") or meta.get("tts_voice") or "ash"),
+    key = _cache_key(text, f"{meta.get('tts_voice_hd') or meta.get('tts_voice') or 'ash'}:{prof_voice}:{prof_rate:.2f}:{prof_pitch:.2f}:{prof_style}",
                      acting_instructions(meta, beat), provider)
     cached = _cache_get(key)
     if cached:

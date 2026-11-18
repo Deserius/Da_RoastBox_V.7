@@ -162,11 +162,16 @@ export default function SettingsPage() {
         </p>
 
         <label className="label" style={{ marginTop: 12 }}>
-          OpenRouter API Key (Free &amp; Premium Models) {(user?.has_byok_openrouter || services?.openrouter_hosted_key) && <span className="text-accent">(active)</span>}
+          OpenRouter API Key (Free &amp; Premium Models){" "}
+          {(user?.has_byok_openrouter || services?.openrouter_hosted_key) && (
+            <span className="text-accent">
+              (active{(user?.saved_key_masks?.openrouter_key || services?.saved_key_masks?.openrouter_key) ? ` · ${user?.saved_key_masks?.openrouter_key || services?.saved_key_masks?.openrouter_key}` : ""})
+            </span>
+          )}
         </label>
         <input
           className="input"
-          placeholder="sk-or-v1-..."
+          placeholder={(user?.saved_key_masks?.openrouter_key || services?.saved_key_masks?.openrouter_key) ? `Saved (${user?.saved_key_masks?.openrouter_key || services?.saved_key_masks?.openrouter_key}) — paste new key to replace` : "sk-or-v1-..."}
           type="password"
           value={openrouterKey}
           onChange={(e) => setOpenrouterKey(e.target.value)}
@@ -175,11 +180,16 @@ export default function SettingsPage() {
         <VerificationBadge result={verifyResults.openrouter_key} />
 
         <label className="label" style={{ marginTop: 12 }}>
-          OpenAI API Key (Writer, Vision &amp; Voices) {(user?.has_byok_openai || services?.openai_hosted_key) && <span className="text-accent">(active)</span>}
+          OpenAI API Key (Writer, Vision &amp; Voices){" "}
+          {(user?.has_byok_openai || services?.openai_hosted_key) && (
+            <span className="text-accent">
+              (active{(user?.saved_key_masks?.openai_key || services?.saved_key_masks?.openai_key) ? ` · ${user?.saved_key_masks?.openai_key || services?.saved_key_masks?.openai_key}` : ""})
+            </span>
+          )}
         </label>
         <input
           className="input"
-          placeholder="sk-..."
+          placeholder={(user?.saved_key_masks?.openai_key || services?.saved_key_masks?.openai_key) ? `Saved (${user?.saved_key_masks?.openai_key || services?.saved_key_masks?.openai_key}) — paste new key to replace` : "sk-..."}
           type="password"
           value={openaiKey}
           onChange={(e) => setOpenaiKey(e.target.value)}
@@ -188,11 +198,16 @@ export default function SettingsPage() {
         <VerificationBadge result={verifyResults.openai_key} />
 
         <label className="label" style={{ marginTop: 12 }}>
-          ElevenLabs API Key (Premium Persona Voices) {(user?.has_byok_elevenlabs || services?.elevenlabs_hosted_key) && <span className="text-accent">(active)</span>}
+          ElevenLabs API Key (Premium Persona Voices){" "}
+          {(user?.has_byok_elevenlabs || services?.elevenlabs_hosted_key) && (
+            <span className="text-accent">
+              (active{(user?.saved_key_masks?.elevenlabs_key || services?.saved_key_masks?.elevenlabs_key) ? ` · ${user?.saved_key_masks?.elevenlabs_key || services?.saved_key_masks?.elevenlabs_key}` : ""})
+            </span>
+          )}
         </label>
         <input
           className="input"
-          placeholder="sk_... or xi-..."
+          placeholder={(user?.saved_key_masks?.elevenlabs_key || services?.saved_key_masks?.elevenlabs_key) ? `Saved (${user?.saved_key_masks?.elevenlabs_key || services?.saved_key_masks?.elevenlabs_key}) — paste new key to replace` : "sk_... or xi-..."}
           type="password"
           value={elevenKey}
           onChange={(e) => setElevenKey(e.target.value)}

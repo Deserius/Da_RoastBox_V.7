@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 
 ROOT_DIR = Path(__file__).resolve().parent
 load_dotenv(ROOT_DIR / ".env")
+from services.workspace_keys import apply_startup_workspace_keys  # noqa: E402
+apply_startup_workspace_keys()
 
 
 def _flag(name: str) -> bool:

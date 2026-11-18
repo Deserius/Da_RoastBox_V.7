@@ -13,7 +13,7 @@ from config import APP_VERSION, CORS_ORIGINS
 from runtime_security import enforce_runtime, RequestSecurityMiddleware
 
 RUNTIME_SECURITY = enforce_runtime(os.environ)
-from db import ensure_indexes, roasts_collection, voice_previews_collection, voice_preview_samples_collection
+from db import ensure_indexes, db, roasts_collection, voice_previews_collection, voice_preview_samples_collection
 from auth_deps import get_optional_user
 from models import User
 from services.voice_orchestrator import prune_audio_cache
@@ -21,7 +21,7 @@ from services.roast_engine import VISIBLE_BILLING, recover_interrupted_generatio
 from services.storage import init_storage
 from services.audio_mastering import load_voice_audio
 from routes.reels import recover_interrupted_reels
-from routes import auth, email_auth, personas, roast, battle, share, reels, payments, voice_settings, download, diagnostics, session_tunnel
+from routes import auth, email_auth, personas, roast, battle, share, reels, payments, voice_settings, download, diagnostics, session_tunnel, tts
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
@@ -47,19 +47,25 @@ async def serve_audio(filename: str, current_user: Optional[User] = Depends(get_
     preview = (await voice_previews_collection.find_one({"filename": filename}, {"_id": 1}) or
                await voice_preview_samples_collection.find_one({"filename": filename}, {"_id": 1}))
     if not preview:
-        owned = current_user and await roasts_collection.find_one(
-            {"user_id": current_user.id, "transcript.audio_url": f"/api/audio/{filename}",
-             "billing_state": VISIBLE_BILLING}, {"_id": 1},
+        owned = current_user and (
+            await roasts_collection.find_one(
+                {"user_id": current_user.id, "transcript.audio_url": f"/api/audio/{filename}",
+                 "billing_state": VISIBLE_BILLING}, {"_id": 1},
+            )
+            or await db["tts_preview_clips"].find_one(
+                {"filename": filename, "user_id": current_user.id}, {"_id": 1},
+            )
         )
         if not owned:
             raise HTTPException(status_code=404, detail="Not found")
     data = await load_voice_audio(filename)
     if data is None:
         raise HTTPException(status_code=404, detail="Not found")
-    return Response(content=data, media_type="audio/mpeg", headers={"Cache-Control": "private, no-store"})
+    media_type = "audio/wav" if filename.lower().endswith(".wav") else "audio/mpeg"
+    return Response(content=data, media_type=media_type, headers={"Cache-Control": "private, no-store"})
 
 
-for module in (diagnostics, auth, email_auth, personas, roast, battle, share, reels, payments, voice_settings, download, session_tunnel):
+for module in (diagnostics, auth, email_auth, personas, roast, battle, share, reels, payments, voice_settings, download, session_tunnel, tts):
     api_router.include_router(module.router)
 
 app.include_router(api_router)

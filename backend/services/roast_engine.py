@@ -94,13 +94,23 @@ async def locked_generation_user(current_user: User = Depends(get_current_user))
 
 
 def user_byok(user: User) -> Tuple[Optional[str], Optional[str]]:
+    import config
     openai_key = decrypt(user.openai_key_encrypted) if user.has_byok_openai else None
     eleven_key = decrypt(user.elevenlabs_key_encrypted) if user.has_byok_elevenlabs else None
+    if config.PREVIEW_SANDBOX_FALLBACK and user.is_preview:
+        from services.workspace_keys import get_saved_key
+        openai_key = openai_key or get_saved_key("openai_key")
+        eleven_key = eleven_key or get_saved_key("elevenlabs_key")
     return openai_key, eleven_key
 
 
 def user_byok_openrouter(user: User) -> Optional[str]:
-    return decrypt(user.openrouter_key_encrypted) if getattr(user, "has_byok_openrouter", False) else None
+    import config
+    key = decrypt(user.openrouter_key_encrypted) if getattr(user, "has_byok_openrouter", False) else None
+    if not key and config.PREVIEW_SANDBOX_FALLBACK and user.is_preview:
+        from services.workspace_keys import get_saved_key
+        key = get_saved_key("openrouter_key")
+    return key
 
 
 def has_premium_voices(user: User) -> bool:

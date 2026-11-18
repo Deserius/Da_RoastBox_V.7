@@ -11,11 +11,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from auth_deps import get_current_user
+import config
 from config import PREVIEW_SANDBOX_FALLBACK, ROOT_DIR, STRIPE_TEST_ONLY
 from crypto_utils import encrypt
 from db import users_collection
 from models import User
 from services.sandbox_preview import is_network_connection_error
+from services.workspace_keys import clear_workspace_byok_keys, get_saved_key_masks, save_workspace_keys
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice-settings", tags=["voice-settings"])
@@ -163,10 +165,17 @@ async def update_keys(body: KeysBody, current_user: User = Depends(get_current_u
         raise HTTPException(status_code=400, detail="No keys provided")
 
     await users_collection.update_one({"id": current_user.id}, {"$set": update})
+    if config.PREVIEW_SANDBOX_FALLBACK:
+        save_workspace_keys({
+            "openai_key": body.openai_key,
+            "elevenlabs_key": body.elevenlabs_key,
+            "openrouter_key": body.openrouter_key,
+        })
     return {"status": "ok",
             "has_byok_openai": update.get("has_byok_openai", current_user.has_byok_openai),
             "has_byok_elevenlabs": update.get("has_byok_elevenlabs", current_user.has_byok_elevenlabs),
-            "has_byok_openrouter": update.get("has_byok_openrouter", getattr(current_user, "has_byok_openrouter", False))}
+            "has_byok_openrouter": update.get("has_byok_openrouter", getattr(current_user, "has_byok_openrouter", False)),
+            "saved_key_masks": get_saved_key_masks() if config.PREVIEW_SANDBOX_FALLBACK else {}}
 
 
 @router.post("/verify")
@@ -219,17 +228,9 @@ async def verify_and_save_keys(body: VerifyAndSaveBody, current_user: User = Dep
     if user_update:
         await users_collection.update_one({"id": current_user.id}, {"$set": user_update})
 
-    env_map = {
-        "emergent_llm_key": "EMERGENT_LLM_KEY",
-        "stripe_api_key": "STRIPE_API_KEY",
-        "stripe_webhook_secret": "STRIPE_WEBHOOK_SECRET",
-        "google_client_id": "GOOGLE_CLIENT_ID",
-        "google_client_secret": "GOOGLE_CLIENT_SECRET",
-    }
-    env_updates = {env_map[k]: provided[k] for k in provided if k in env_map}
     server_env_updated = False
-    if env_updates and PREVIEW_SANDBOX_FALLBACK:
-        _update_local_env(env_updates)
+    if config.PREVIEW_SANDBOX_FALLBACK:
+        save_workspace_keys(provided)
         server_env_updated = True
 
     return {
@@ -238,6 +239,7 @@ async def verify_and_save_keys(body: VerifyAndSaveBody, current_user: User = Dep
         "activated": True,
         "server_env_updated": server_env_updated,
         "results": results,
+        "saved_key_masks": get_saved_key_masks() if config.PREVIEW_SANDBOX_FALLBACK else {},
         "has_byok_openai": user_update.get("has_byok_openai", current_user.has_byok_openai),
         "has_byok_elevenlabs": user_update.get("has_byok_elevenlabs", current_user.has_byok_elevenlabs),
         "has_byok_openrouter": user_update.get("has_byok_openrouter", getattr(current_user, "has_byok_openrouter", False)),
@@ -254,4 +256,6 @@ async def clear_keys(current_user: User = Depends(get_current_user)):
             "openrouter_key_encrypted": None, "has_byok_openrouter": False,
         }},
     )
+    if config.PREVIEW_SANDBOX_FALLBACK:
+        clear_workspace_byok_keys()
     return {"status": "ok"}

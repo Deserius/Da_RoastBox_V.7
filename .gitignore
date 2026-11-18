@@ -138,3 +138,7 @@ backend/media_tmp/
 
 # Prepared Windows binaries are a downloadable artifact, not cloud source.
 runtime/
+
+.backups/
+backend/models/
+backend/.workspace_keys.json

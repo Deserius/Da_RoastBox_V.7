@@ -143,12 +143,13 @@ def test_kokoro_piper_edge_elevenlabs_synthesis_and_cache(tmp_path, monkeypatch)
                 assert res_p.provider == "piper"
 
             # 3. ElevenLabs preservation when explicitly selected with API key
-            with patch("services.tts.elevenlabs_provider.synthesize", new=AsyncMock(return_value=b"ID3fake-mp3-data" * 50)) as mock_el:
-                res_el = await manager.synthesize_speech(
-                    text="Premium ElevenLabs voice preserved.", persona_id="persona_p1",
-                    provider_preference="elevenlabs", user_elevenlabs_key="sk_test_el_123456789012345",
-                    allow_premium_elevenlabs=True,
-                )
+    with patch("services.tts.elevenlabs_provider.synthesize", new=AsyncMock(return_value=b"ID3fake-mp3-data" * 50)) as mock_el:
+        el_dummy = "el-offline-not-a-real-key-012345"
+        res_el = await manager.synthesize_speech(
+            text="Premium ElevenLabs voice preserved.", persona_id="persona_p1",
+            provider_preference="elevenlabs", user_elevenlabs_key=el_dummy,
+            allow_premium_elevenlabs=True,
+        )
                 assert res_el.provider == "elevenlabs"
                 assert mock_el.call_count == 1
 
@@ -198,12 +199,14 @@ def test_workspace_keys_persist_across_preview_sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace_keys, "STORE_PATH", tmp_path / ".workspace_keys.json")
     monkeypatch.setenv("PREVIEW_SANDBOX_FALLBACK", "true")
 
+    dummy_or = "sk-or-v1-" + "offline-not-a-real-key-12345"
+    dummy_el = "el-" + "offline-not-a-real-key-12345"
     workspace_keys.save_workspace_keys({
-        "openrouter_key": "sk-or-v1-testkey12345678901234567890",
-        "elevenlabs_key": "sk_eleven_testkey12345678901234567890",
+        "openrouter_key": dummy_or,
+        "elevenlabs_key": dummy_el,
     })
-    assert workspace_keys.get_saved_key("openrouter_key") == "sk-or-v1-testkey12345678901234567890"
-    assert workspace_keys.get_saved_key("elevenlabs_key") == "sk_eleven_testkey12345678901234567890"
+    assert workspace_keys.get_saved_key("openrouter_key") == dummy_or
+    assert workspace_keys.get_saved_key("elevenlabs_key") == dummy_el
     masks = workspace_keys.get_saved_key_masks()
     assert "openrouter_key" in masks and "••••" in masks["openrouter_key"]
 
